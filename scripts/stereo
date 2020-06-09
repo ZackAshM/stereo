@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+
+"""
+Simulate the performance of the stereo star tracker.
+"""
+if __name__ == "__main__":
+
+    import argparse
+
+    # create the argument parser
+    parser = argparse.ArgumentParser(description="STEREO: Star TrackER for puEO.")
+
+    # and parse the arguments
+    args = parser.parse_args()

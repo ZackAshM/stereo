@@ -1,5 +1,5 @@
 from os import path
-from setuptools import setup, find_packages
+from setuptools import setup
 
 # the stereo version
 __version__ = "0.0.1"
@@ -30,15 +30,22 @@ setup(
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
     ],
-    keywords=["star tracker camera astronomy balloon orbital"],
+    keywords=["star", "tracker", "camera", "astronomy", "balloon", "orbital"],
     packages=["stereo"],
     python_requires=">=3.6*, <4",
-    install_requires=[],
+    install_requires=["numpy", "astropy", "matplotlib"],
     extras_require={
-        "test": ["pytest", "black", "mypy",
-                 "coverage", "pytest-cov", "flake8"],
+        "test": [
+            "pytest",
+            "black",
+            "mypy",
+            "isort",
+            "coverage",
+            "pytest-cov",
+            "flake8",
+        ],
     },
-    scripts=[],
+    scripts=["scripts/stereo"],
     project_urls={},
     include_package_data=True,
 )
