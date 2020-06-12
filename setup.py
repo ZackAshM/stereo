@@ -33,7 +33,7 @@ setup(
     keywords=["star", "tracker", "camera", "astronomy", "balloon", "orbital"],
     packages=["stereo"],
     python_requires=">=3.6*, <4",
-    install_requires=["numpy", "astropy", "matplotlib"],
+    install_requires=["numpy", "astropy", "matplotlib", "astroquery"],
     extras_require={
         "test": [
             "pytest",
