@@ -5,7 +5,7 @@ from astropy import units as u
 from astropy.coordinates import AltAz, EarthLocation, SkyCoord
 from astropy.table import Table
 from astropy.time import Time
-
+from matplotlib import pyplot as plt
 from scipy.ndimage import gaussian_filter
 
 
@@ -263,7 +263,7 @@ def generate_starfield(
     cam_params: dict,
     obs_params: dict,
     mag_limit: float = 7,
-    psf_sigma: float = 1,
+    psf_sigma: float = 5,
 ) -> np.ndarray:
     """
     Generate a star field centered around center_coord
@@ -291,6 +291,8 @@ def generate_starfield(
     -------
     starfield : ndarray
         The array of pixel values making up the star field.
+    fig : matplotlib.figure.Figure
+        The plotted starfield.
     """
 
     # calculate the field of view
@@ -314,5 +316,10 @@ def generate_starfield(
     # apply a Gaussian PSF
     starfield = gaussian_filter(starframe, sigma=psf_sigma)
 
-    # and return the starfield
-    return starfield
+    # plot the starfield
+    fig, ax = plt.subplots()
+    plt.gray()
+    ax.imshow(starfield)
+
+    # and return the starfield and figure
+    return starfield, fig
