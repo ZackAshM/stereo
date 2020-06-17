@@ -36,7 +36,7 @@ setup(
 <<<<<<< HEAD
     install_requires=["numpy", "astropy", "matplotlib", "astroquery", "scipy"],
 =======
-    install_requires=["numpy", "astropy", "matplotlib", "uproot"],
+    install_requires=["numpy", "astropy", "matplotlib", "uproot", "scipy"],
 >>>>>>> 3158ba515b7fbd44ba69f142b513145ef67c0aea
     extras_require={
         "test": [
