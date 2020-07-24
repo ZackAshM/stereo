@@ -1,3 +1,7 @@
+"""
+This module provides a method to load ANITA data as an Observation object.
+"""
+
 from astropy.time import Time
 
 import stereo.flightpath as flightpath

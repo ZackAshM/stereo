@@ -18,8 +18,8 @@ def ASI183MM_Sigma135mm() -> Camera:
     focal_length = 135  # mm
     fnumber = 1.8
     avg_noise = 1.6
-    temp = 20
-    exp_time = 1
+    temp = 20 # C
+    exp_time = 0.3 # s 
     max_ct = 15000
 
     camera = Camera(
