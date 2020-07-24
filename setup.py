@@ -33,7 +33,15 @@ setup(
     keywords=["star", "tracker", "camera", "astronomy", "balloon", "orbital"],
     packages=["stereo"],
     python_requires=">=3.6*, <4",
-    install_requires=["numpy", "astropy", "matplotlib", "uproot", "scipy"],
+    install_requires=[
+        "numpy",
+        "astropy",
+        "matplotlib",
+        "uproot",
+        "scipy",
+        "attrs",
+        "tetra3 @ git+https://github.com/esa/tetra3"
+    ],
     extras_require={
         "test": [
             "pytest",

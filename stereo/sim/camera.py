@@ -1,325 +1,428 @@
-from typing import Tuple
+"""
+This module provides the classes Camera, Observation, and Image.
+"""
 
+from typing import Any, Tuple
+
+import attr
 import numpy as np
 from astropy import units as u
 from astropy.coordinates import AltAz, EarthLocation, SkyCoord
 from astropy.table import Table
 from astropy.time import Time
 from matplotlib import pyplot as plt
+from matplotlib.colors import LogNorm
+from scipy.integrate import simps
 from scipy.ndimage import gaussian_filter
 
 
-def fov(
-    sensor_width: float, sensor_height: float, focal_length: float
-) -> Tuple[float, float, float]:
+@attr.s
+class Camera(object):
     """
-    Calculates the horizontal, vertical, and diagonal
-    field of view (FoV) of a camera given its sensor
-    width and height, and the focal length of the
-    camera lens.
+    Camera parameters used for star trackers. Includes information
+    on both the CCD and the lens.
 
-    Parameters
+    Attributes
     ----------
-    sensor_width : float
-        The width of the camera sensor (mm).
-    sensor_height : float
-        The height of the camera sensor (mm).
+    sensor_pixwidth : int
+        The CCD width in pixels.
+    sensor_pixheight : int
+        The CCD height in pixels.
+    pix_size : float
+        The size of CCD pixels in mm/pix.
     focal_length : float
-        The focal length of the camera lens (mm).
-    Returns
-    -------
-    xfov, yfov, dfov : float
-        The horizontal (x), vertical (y), and
-        diagonal (d) field of view in degrees.
-    """
+        The lens focal length in mm.
+    fnumber : float
+        The lens f-number.
+    avg_noise : float
+        The average noise of the CCD. Default = 0.
+    temp : float
+        The temperature of the CCD in celsius. Default = 20.
+    exp_time : float
+        The exposure time in seconds. Default = 0.3.
+    max_ct : int
+        The maximum well depth of the CCD in counts. Default = 15000.
+    QE : ndarray
+        The response vs wavelength (nm) of the CCD
+        quantum efficiency.
+    dark_current : ndarray
+        The dark current (e/s) vs temperature (C) of the CCD.
 
-    # set the values
-    w = sensor_width
-    h = sensor_height
-    f = focal_length
-    d = np.sqrt(w ** 2 + h ** 2)
-
-    # calculate the FoV in radians
-    xfov_rad = 2 * np.arctan2(w / 2, f)
-    yfov_rad = 2 * np.arctan2(h / 2, f)
-    dfov_rad = 2 * np.arctan2(d / 2, f)
-
-    # convert them to degrees
-    xfov = np.rad2deg(xfov_rad)
-    yfov = np.rad2deg(yfov_rad)
-    dfov = np.rad2deg(dfov_rad)
-
-    # and return them
-    return xfov, yfov, dfov
-
-
-def bright_conesearch(
-    center_coord: SkyCoord = None, radius: float = None, mag_limit: float = None
-) -> Table:
-    """
-    Return an astropy table of star coordinates and magnitudes
-    from the Yale Bright Star Catalog. Specify a center
-    sky coordinate and a radius to return the bright stars
-    within a cone of the given radius from the center.
-    Specify a magnitude limit to return stars whose magnitude
-    are below the given limit.
-
-    Parameters
+    Properties
     ----------
-    center_coord : SkyCoord
-        The sky coordinates of the center in a conesearch.
     radius : float
-        The radius from the center_coord in a conesearch (deg).
-    mag_limit : float
-        The magnitude cutoff limit.
+        The first order radius of the lens aperture.
+    fov : Tuple[float, float, float]
+        The horizontal, vertical, and diagonal fields of view.
 
-    Returns
+    Methods
     -------
-    catalog : Table
-        The catalog of bright stars. Includes only stars satisfying
-        the conesearch or magnitude cutoff if they are used.
-        Otherwise returns the full sky.
+    loadQE(path, **kwargs)
+        Load QE data into the QE attribute using np.genfromtxt.
+    loadDark(path, **kwargs)
+        Load dark current data into the dark_current attribute
+        using np.genfromtxt.
     """
 
-    # get the bright star catalog
-    BSC5 = "yale_bright_star_catalog5.fits.gz"
-    catalog = Table.read(BSC5)
+    sensor_pixwidth: int = attr.ib(default=None)
+    sensor_pixheight: int = attr.ib(default=None)
+    pix_size: float = attr.ib(default=None)
+    focal_length: float = attr.ib(default=None)
+    fnumber: float = attr.ib(default=None)
+    avg_noise: float = attr.ib(default=0.0)
+    temp: float = attr.ib(default=20.0)
+    exp_time: float = attr.ib(default=1.0)
+    max_ct: int = attr.ib(default=15000)
+    QE: np.ndarray = attr.ib(default=None)
+    dark_current: np.ndarray = attr.ib(default=None)
 
-    # change column names for convenience
-    catalog.rename_columns(("RAJ2000", "DEJ2000", "Vmag"), ("ra", "dec", "Mag"))
+    @property
+    def radius(self) -> float:
+        """Returns the aperture radius."""
+        try:
+            return self._radius  # type: ignore
+        except AttributeError:
+            if None in [self.focal_length, self.fnumber]:
+                raise TypeError("non-None values required for focal_length and fnumber")
+            radius = self.focal_length / self.fnumber / 2
+            self._radius = radius
+            return radius
 
-    # cutoff stars above mag_limit if given
-    if mag_limit is not None:
-        catalog = catalog[catalog["Mag"] <= mag_limit]
+    @property
+    def fov(self) -> Tuple[float, float, float]:
+        """
+        Returns the horizontal, vertical, and diagonal
+        field of view (FoV) in degrees.
+        """
+        try:
+            return self._fov  # type: ignore
+        except AttributeError:
+            # set the values
+            w = self.sensor_pixwidth
+            h = self.sensor_pixheight
+            f = self.focal_length
+            pix = self.pix_size
+            if None in [w, h, f, pix]:
+                raise TypeError(
+                    "non-None values required for sensor_pixwidth, ",
+                    "sensor_pixheight, focal_length, and pix_size",
+                )
+            f = f / pix
+            d = np.sqrt(w ** 2 + h ** 2)
 
-    # cutoff stars beyond radius of center if given
-    if radius is not None:
-        # raise error if center coord not given
-        if center_coord is None:
-            raise ValueError(
-                "Center coordinates, center_coords=SkyCoord(), "
-                "must be provided if radius is given."
+            # calculate the FoV in radians
+            xfov_rad = 2 * np.arctan2(w / 2, f)
+            yfov_rad = 2 * np.arctan2(h / 2, f)
+            dfov_rad = 2 * np.arctan2(d / 2, f)
+
+            # convert them to degrees
+            xfov = np.rad2deg(xfov_rad)
+            yfov = np.rad2deg(yfov_rad)
+            dfov = np.rad2deg(dfov_rad)
+
+            # and return them
+            self._fov = (xfov, yfov, dfov)
+            return (xfov, yfov, dfov)
+
+    def loadQE(self, path: str, **kwargs: Any) -> None:
+        """
+        Load data into QE.
+
+        Parameters
+        ----------
+        path: str
+            The data path.
+        **kwargs: Any
+            Pass kwargs into numpy.genfromtxt.
+        """
+        self.QE = np.genfromtxt(path, **kwargs)
+
+    def loadDark(self, path: str, **kwargs: Any) -> None:
+        """
+        Load data into dark_current.
+
+        Parameters
+        ----------
+        path: str
+            The data path.
+        **kwargs: Any
+            Pass kwargs into numpy.genfromtxt.
+        """
+        self.dark_current = np.genfromtxt(path, **kwargs)
+
+
+@attr.s
+class Observation(object):
+    """
+    The parameters describing an observation location and time.
+
+    Attributes
+    ----------
+    lat : float
+        The latitude in degrees.
+    lon : float
+        The longitude in degrees.
+    alt : float
+        The altitude in meters.
+    time : str
+        The time of observation in any astropy acceptable time formats.
+
+    Properties
+    ----------
+    altaz_frame : astropy.coordinates.AltAz
+        The frame needed to transform ra, dec to alt, az.
+    """
+
+    lat: float = attr.ib()
+    lon: float = attr.ib()
+    alt: float = attr.ib()
+    time: Time = attr.ib(default=Time("2000-01-01 00:00:00", format="iso"))
+
+    @property
+    def altaz_frame(self) -> AltAz:
+        """Returns the frame for transforming ra,dec to alt,az."""
+        try:
+            return self._altaz_frame  # type: ignore
+        except AttributeError:
+            loc = EarthLocation(
+                lat=self.lat * u.deg, lon=self.lon * u.deg, height=self.alt * u.m
+            )
+            time = Time(self.time)
+            altaz = AltAz(location=loc, obstime=time)
+            self._altaz_frame = altaz
+            return altaz
+
+
+@attr.s
+class Image(object):
+    """
+    An image class containing at least a table of stars
+    and a sky center, and capable of image generation of stars
+    using Camera and Observation objects.
+
+    Attributes
+    ----------
+    stars : astropy.table.Table
+        The table of stars 'ra', 'dec', and 'Mag'.
+    center : astropy.coordinates.SkyCoord
+        The sky coordinates of the center of the image.
+    observation : Observation
+        The Observation object.
+    cam : Camera
+        The Camera object.
+    psf_sigma : float
+        The standard deviation of the Gaussian PSF in pixels. Default = 2.
+
+    Properties
+    ----------
+    size : Tuple[int, int]
+        The size of the image frame in pixels.
+    altaz_stars : astropy.table.Table
+        The table of stars 'alt', 'az', 'Mag'.
+    image_data : numpy.ndarray
+        The ndarray of a pixel grid containing pixel values
+        corresponding to the location and magnitudes of the stars.
+
+    Methods
+    -------
+    mag2pix(coords) : astropy.table.Table
+        Returns the stars table (of either ra,dec or alt,az)
+        with magnitude values converted to total pixel counts.
+    plot(**kwargs)
+        Plots the image data.
+    """
+
+    stars: Table = attr.ib()
+    center: SkyCoord = attr.ib()
+    observation: Observation = attr.ib(default=None)
+    cam: Camera = attr.ib(default=None)
+    psf_sigma: float = attr.ib(default=2)
+
+    @property
+    def size(self) -> Tuple[int, int]:
+        """Returns the pixel dimensions of the CCD."""
+        try:
+            return self._size  # type: ignore
+        except AttributeError:
+            if self.cam is None:
+                raise ValueError("Camera object required to determine image size")
+            size = (self.cam.sensor_pixheight, self.cam.sensor_pixwidth)
+            self._size = size
+            return size
+
+    @property
+    def altaz_stars(self) -> Table:
+        """
+        Convert the (ra, dec) coordinates in a given astropy table
+        of stars with columns 'ra', 'dec', and 'Mag' to (alt, az)
+        using the observation location and time.
+
+        Returns
+        -------
+        altaz_table : astropy.table.Table
+            The converted table with column coordinates 'alt'
+            and 'az' in degrees, and magnitude column 'Mag'.
+        """
+
+        try:
+            return self._altaz_stars  # type: ignore
+        except AttributeError:
+            if self.observation is None:
+                raise ValueError("Observation object required for alt/az conversion")
+
+            # make the table for alt, az coords
+            altaz_table = Table(self.stars, names=["alt", "az", "Mag"], copy=True)
+
+            # get skycoords for ra,dec transformed to alt,az
+            obs_time = self.observation.time
+            rd2aa = SkyCoord(
+                ra=self.stars["ra"], dec=self.stars["dec"], obstime=obs_time, unit=u.deg
+            ).transform_to(self.observation.altaz_frame)
+
+            # set table values to the transformed coords
+            altaz_table["alt"] = rd2aa.alt.value * rd2aa.alt.unit
+            altaz_table["az"] = rd2aa.az.value * rd2aa.az.unit
+
+            # return result
+            self._altaz_stars = altaz_table
+            return altaz_table
+
+    @property
+    def image(self) -> np.ndarray:
+        """
+        Returns the ndarray containing pixel values corresponding to
+        positions and magnitudes in self.stars with a Gaussian PSF.
+
+        Returns
+        -------
+        image_data : ndarray
+            An ndarray with dimensions of CCD with pixels
+            equal to the total pixel flux where a star is located.
+        """
+
+        try:
+            return self._image  # type: ignore
+        except AttributeError:
+
+            if None in [self.cam, self.observation]:
+                raise ValueError("Camera and Observation objects required for image")
+
+            altaz_center = self.center.transform_to(self.observation.altaz_frame)
+            center_alt = altaz_center.alt.value
+            center_az = altaz_center.az.value
+
+            # define the frame boundaries x=az, y=alt
+            xfov, yfov, _ = self.cam.fov
+            alt_lo = center_alt - (yfov / 2)
+            alt_hi = center_alt + (yfov / 2)
+            az_lo = center_az - (xfov / 2)
+            az_hi = center_az + (xfov / 2)
+
+            star_table = self.mag2pix(self.altaz_stars)
+            alt1 = star_table["alt"]
+            az1 = star_table["az"]
+
+            # remove any stars outside the boundaries
+            alt_bound = np.logical_and(alt1 >= alt_lo, alt1 <= alt_hi)
+            az_bound = np.logical_and(az1 >= az_lo, az1 <= az_hi)
+            bound = np.logical_and(alt_bound, az_bound)
+            stars = star_table[bound]
+
+            alt = stars["alt"]
+            az = stars["az"]
+            ct = stars["Total Counts"]
+
+            height, width = self.size
+            image_data = np.zeros((height, width))
+
+            # get the span of alt, az positions
+            azspan = az_hi - az_lo
+            altspan = alt_hi - alt_lo
+
+            # get the mapping scale
+            azscale = (az - az_lo) / azspan
+            altscale = (alt - alt_lo) / altspan
+
+            # map the positions to the frame indices
+            azind = np.round_(azscale * (width - 1)).astype(int)
+            altind = np.round_(altscale * (height - 1)).astype(int)
+
+            # set pixel values
+            for i in zip(altind, azind, ct):
+                image_data[i[0], i[1]] = i[2]
+
+            # apply Gaussian PSF
+            image_data = gaussian_filter(image_data, sigma=self.psf_sigma)
+
+            # add noise and dark current
+            image_data += np.random.poisson(self.cam.avg_noise, size=self.size)
+            noise_level = np.interp(self.cam.temp, *self.cam.dark_current)
+            image_data += np.random.lognormal(
+                noise_level * self.cam.exp_time, size=self.size
             )
 
-        # get the star coords
-        cat_ra = catalog["ra"]
-        cat_dec = catalog["dec"]
-        starcoords = SkyCoord(ra=cat_ra, dec=cat_dec, unit=u.deg)
-        catalog["skycoord"] = starcoords
+            image_data = np.clip(image_data, 0, self.cam.max_ct)
 
-        # get the separation of stars from the center
-        separations = catalog["skycoord"].separation(center_coord)
-        catalog["separation"] = separations
+            # and return the image
+            self._image = image_data
+            return image_data
 
-        # get only stars within the given radius
-        catalog = catalog[catalog["separation"] <= radius * u.deg]
+    def mag2pix(self, table: Table = None) -> Table:
+        """
+        Returns the stars table with magnitudes converted to total pixel counts.
 
-    # return the ra, dec, mag of resulting catalog
-    return catalog["ra", "dec", "Mag"]
+        Parameters
+        ----------
+        table : astropy.table.Table
+            The star table to use. If None, the ra,dec stars table is used.
 
+        Returns
+        -------
+        stars : Table
+            The table containing pixel values corresponding to the magnitudes.
+        """
 
-def radec2altaz(
-    radec_table: Table,
-    obs_lat: float,
-    obs_lon: float,
-    obs_alt: float,
-    obs_time: str = None,
-) -> Table:
-    """
-    Convert the (ra, dec) coordinates in a given astropy table
-    of stars with columns 'ra', 'dec', and 'Mag' to (alt, az)
-    using the observation location and time.
+        # get the desired star table
+        if table is not None:
+            stars = Table(table, copy=True)
+        else:
+            stars = Table(self.stars, copy=True)
 
-    Parameters
-    ----------
-    radec_table : Table
-        The astropy table of stars with column coordinates
-        'ra' and 'dec' in degrees, and magnitude column 'Mag'.
-    obs_lat : float
-        The latitude on Earth of the observation (deg).
-    obs_lon : float
-        The longitude on Earth of the observation (deg).
-    obs_alt : float
-        The altitude on Earth of the observation (m).
-    obs_time : str
-        The observation time (YYYY-MM-DDTHH:MM:SS).
+        # quantify the magnitudes
+        mag = np.array(stars["Mag"])
+        mag_val = mag * u.STmag
 
-    Returns
-    -------
-    altaz_table : astropy.table.Table
-        The converted table with column coordinates 'alt'
-        and 'az' in degrees, and magnitude column 'Mag'.
-    altaz : AltAz
-        The alt, az frame used for the conversion.
-    """
+        # convert magnitudes to flux
+        flux = mag_val.to(
+            u.photon / u.s / u.cm ** 2 / u.nm, u.spectral_density(550 * u.nm)
+        )
 
-    # make the table for alt, az coords
-    altaz_table = Table(radec_table, names=["alt", "az", "Mag"], copy=True)
+        # get the total QE response
+        QE = self.cam.QE
+        if QE is not None:
+            response = simps(QE[1], QE[0]) * u.nm / u.photon
+        else:
+            response = 600 * u.nm / u.photon  # 100% from 400nm to 1000nm
 
-    # get the observation location and time
-    loc = EarthLocation(lat=obs_lat * u.deg, lon=obs_lon * u.deg, height=obs_alt * u.m)
-    time = Time(obs_time)
+        aper_area = np.pi * (self.cam.radius * 0.1) ** 2
 
-    # define the AltAz frame
-    altaz = AltAz(location=loc, obstime=time)
+        # calculate the pixel counts
+        pixel_cts = flux * self.cam.exp_time * aper_area * response
 
-    # get skycoords for ra,dec transformed to alt,az
-    rd2aa = SkyCoord(
-        ra=radec_table["ra"], dec=radec_table["dec"], obstime=obs_time, unit=u.deg
-    ).transform_to(altaz)
+        # replace the magnitudes with pixel values
+        stars["Mag"] = pixel_cts
+        stars.rename_column("Mag", "Total Counts")
 
-    # set table values to the transformed coords
-    altaz_table["alt"] = rd2aa.alt.value * rd2aa.alt.unit
-    altaz_table["az"] = rd2aa.az.value * rd2aa.az.unit
+        # and return the table
+        return stars
 
-    # return result
-    return altaz_table, altaz
-
-
-def map_stars(
-    altaz_stars: Table,
-    altaz_center: SkyCoord,
-    xfov: float,
-    yfov: float,
-    width: int,
-    height: int,
-) -> np.ndarray:
-    """
-    Map the (alt, az) positions of stars onto pixels of a frame
-    with dimensions (height, width) centered at altaz_center.
-
-    Parameters
-    ----------
-    altaz_stars : Table
-        Astropy table of stars with at least columns 'alt' and 'az'
-        in degrees.
-    altaz_center : SkyCoord
-        The sky coordinates in (alt, az) of the center of the
-        framewhich to map the stars onto.
-    xfov : float
-        The horizontal field of view in degrees.
-    yfov : float
-        The vertical field of view in degrees.
-    width : int
-        The pixel width of the frame which to map the stars onto.
-    height : int
-        The pixel height of the frame which to map the stars onto.
-
-    Returns
-    -------
-    mapped_stars : ndarray
-        An ndarray with dimensions (height, width) with pixels
-        equal to 1 if a star is located there.
-    """
-
-    # get the center coordinate values
-    center_alt = altaz_center.alt.value
-    center_az = altaz_center.az.value
-
-    # define the frame boundaries x=az, y=alt
-    alt_lo = center_alt - (yfov / 2)
-    alt_hi = center_alt + (yfov / 2)
-    az_lo = center_az - (xfov / 2)
-    az_hi = center_az + (xfov / 2)
-
-    # get the alt, az arrays of the stars
-    alt1 = altaz_stars["alt"]
-    az1 = altaz_stars["az"]
-
-    # remove any stars outside the boundaries
-    alt_bound = np.logical_and(alt1 >= alt_lo, alt1 <= alt_hi)
-    az_bound = np.logical_and(az1 >= az_lo, az1 <= az_hi)
-    bound = np.logical_and(alt_bound, az_bound)
-    stars = altaz_stars[bound]
-
-    # get the alt, az of the remaining stars
-    alt = stars["alt"]
-    az = stars["az"]
-
-    # create an empty frame
-    frame = np.zeros((height, width))
-
-    # get the span of alt, az positions
-    azspan = az_hi - az_lo
-    altspan = alt_hi - alt_lo
-
-    # get the mapping scale
-    azscale = (az - az_lo) / azspan
-    altscale = (alt - alt_lo) / altspan
-
-    # map the positions to the frame indices
-    azind = np.round_(azscale * (width - 1)).astype(int)
-    altind = np.round_(altscale * (height - 1)).astype(int)
-
-    # set pixel values of alt, az in the frame to 1
-    frame[altind, azind] = 1
-
-    # and return the frame
-    return frame
-
-
-def generate_starfield(
-    center_radec: SkyCoord,
-    cam_params: dict,
-    obs_params: dict,
-    mag_limit: float = 7,
-    psf_sigma: float = 5,
-) -> np.ndarray:
-    """
-    Generate a star field centered around center_coord
-    (ra,dec) using camera parameters and observation parameters.
-    A cutoff magnitude can be specified if desired. Stars follow
-    a Gaussian Point Spread Function with a specified standard
-    deviation.
-
-    Parameters
-    ----------
-    center_radec : SkyCoord
-        The (ra, dec) sky coordinates of the center of the frame.
-    cam_params : Dict[str, float]
-        Camera parameters 'sensor_width' (mm), 'sensor_height' (mm),
-        and 'focal_length' (mm).
-    obs_params : Dict[str, float]
-        Observation parameters 'obs_lat' (deg), 'obs_lon' (deg),
-        'obs_alt' (deg), and 'obs_time' (str).
-    mag_limit : float
-        All stars used will be of magnitude less than this.
-    psf_sigma : float
-        The size/standard deviation of the Guassian Point Spread Function.
-
-    Returns
-    -------
-    starfield : ndarray
-        The array of pixel values making up the star field.
-    fig : matplotlib.figure.Figure
-        The plotted starfield.
-    """
-
-    # calculate the field of view
-    xfov, yfov, dfov = fov(**cam_params)
-
-    # generate a table of bright stars within fov
-    radius = dfov / 2
-    stars_radec = bright_conesearch(center_radec, radius, mag_limit)
-
-    # convert the star coordinates to alt, az
-    stars_altaz, altaz = radec2altaz(stars_radec, **obs_params)
-
-    # get the center alt, az
-    center_altaz = center_radec.transform_to(altaz)
-
-    # map the remaining stars to a frame
-    width = cam_params["sensor_width"]
-    height = cam_params["sensor_height"]
-    starframe = map_stars(stars_altaz, center_altaz, xfov, yfov, width, height)
-
-    # apply a Gaussian PSF
-    starfield = gaussian_filter(starframe, sigma=psf_sigma)
-
-    # plot the starfield
-    fig, ax = plt.subplots()
-    plt.gray()
-    ax.imshow(starfield)
-
-    # and return the starfield and figure
-    return starfield, fig
+    def plot(self) -> None:
+        """Minimally plot the image data."""
+        fig, ax = plt.subplots(figsize=[20, 10])
+        plt.gray()
+        plt.title(
+            r"ra{0:.2f}$\degree$dec{1:.2f}$\degree$, FoV: {2:.1f}$\degree$".format(
+                self.center.ra.value, self.center.dec.value, self.cam.fov[2]
+            )
+        )
+        ax.imshow(self.image, norm=LogNorm(vmin=1, vmax=self.cam.max_ct))
