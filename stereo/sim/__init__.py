@@ -1,6 +1,8 @@
-from .camera import Camera, Image, Observation
+from .camera import Camera
 from .generate_stars import bright_conesearch, generate_starfield
+from .image import Image
 from .load_anita import load_anita_observation
+from .observation import Observation
 
 __all__ = [
     "Camera",

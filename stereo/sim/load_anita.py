@@ -5,7 +5,7 @@ This module provides a method to load ANITA data as an Observation object.
 from astropy.time import Time
 
 import stereo.flightpath as flightpath
-from stereo.sim import Observation
+from stereo.sim.observation import Observation
 
 
 def load_anita_observation(flight: int = 4, ind: int = 0) -> Observation:
@@ -30,10 +30,22 @@ def load_anita_observation(flight: int = 4, ind: int = 0) -> Observation:
     # arrays: heading, latitude, longitude, altitude, realTime, pitch, roll
     data = flightpath.load_flight(flight)
 
-    lat = data[1][ind]
-    lon = data[2][ind]
-    alt = data[3][ind]
-    time = Time(data[4][ind], format="unix")
+    maxind = data[0].size - 1
+
+    while True:
+        try:
+            lat = data[1][ind]
+            lon = data[2][ind]
+            alt = data[3][ind]
+            time = Time(data[4][ind], format="unix")
+            break
+        except IndexError:
+            print(
+                "WARNING: the requested event index, {},".format(ind),
+                "is outside the range of ANITA data of size {}.".format(maxind),
+                "Defaulting to event index 0.",
+            )
+            ind = 0
 
     obs = Observation(lat=lat, lon=lon, alt=alt, time=time)
 

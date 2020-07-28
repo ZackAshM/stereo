@@ -8,7 +8,9 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
 
-from stereo.sim import Camera, Image, Observation
+from stereo.sim.camera import Camera
+from stereo.sim.image import Image
+from stereo.sim.observation import Observation
 
 
 def bright_conesearch(
@@ -78,7 +80,7 @@ def generate_starfield(
     cam: Camera,
     obs: Observation,
     mag_limit: float = 7,
-    psf_sigma: float = 5,
+    psf_sigma: float = 3,
 ) -> np.ndarray:
     """
     Generate a star field centered around center_coord
