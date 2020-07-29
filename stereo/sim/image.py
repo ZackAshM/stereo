@@ -38,6 +38,8 @@ class Image(object):
         The Observation object.
     cam : Camera
         The Camera object.
+    mag_limit : float
+        The most dim magnitude cutoff. Default = max magnitude in stars['Mag'].
     psf_sigma : float
         The standard deviation of the Gaussian PSF in pixels. Default = 2.
 
@@ -68,7 +70,13 @@ class Image(object):
     center: SkyCoord = attr.ib()
     observation: Observation = attr.ib(default=None)
     cam: Camera = attr.ib(default=None)
+    mag_limit: float = attr.ib()
     psf_sigma: float = attr.ib(default=2)
+
+    @mag_limit.default
+    def mag_limit_default(self) -> float:
+        """Sets default mag_limit to dimmest magnitude given."""
+        return np.amax(self.stars["Mag"])
 
     @property
     def size(self) -> Tuple[int, int]:

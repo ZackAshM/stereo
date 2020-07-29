@@ -3,6 +3,8 @@ This module provides the methods for star field data generation,
 including a conesearch method for bright stars.
 """
 
+import os.path as op
+
 import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
@@ -42,7 +44,10 @@ def bright_conesearch(
     """
 
     # get the bright star catalog
-    BSC5 = "data/yale_bright_star_catalog5.fits.gz"
+    data_directory = op.join(
+        op.dirname(op.dirname(op.dirname(op.abspath(__file__)))), "data"
+    )
+    BSC5 = op.join(data_directory, "yale_bright_star_catalog5.fits.gz")
     catalog = Table.read(BSC5)
 
     catalog.rename_columns(("RAJ2000", "DEJ2000", "Vmag"), ("ra", "dec", "Mag"))
@@ -121,6 +126,7 @@ def generate_starfield(
         center=center_radec,
         observation=obs,
         cam=cam,
+        mag_limit=mag_limit,
         psf_sigma=psf_sigma,
     )
 
