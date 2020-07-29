@@ -34,10 +34,10 @@ def load_anita_observation(flight: int = 4, ind: int = 0) -> Observation:
 
     while True:
         try:
-            lat = data[1][ind]
-            lon = data[2][ind]
-            alt = data[3][ind]
-            time = Time(data[4][ind], format="unix")
+            lat = data.latitude[ind]
+            lon = data.longitude[ind]
+            alt = data.altitude[ind]
+            time = Time(data.realTime[ind], format="unix")
             break
         except IndexError:
             print(
