@@ -116,7 +116,7 @@ class Camera(object):
             self._fov = (xfov, yfov, dfov)
             return (xfov, yfov, dfov)
 
-    def loadQE(self, path: str, **kwargs: Any) -> None:
+    def loadQE(self, path: str, QE_peak: float = 1.0, **kwargs: Any) -> None:
         """
         Load data into QE.
 
@@ -124,10 +124,14 @@ class Camera(object):
         ----------
         path: str
             The data path.
+        QE_peak : float
+            The peak QE to be specified if data is relative.
         **kwargs: Any
             Pass kwargs into numpy.genfromtxt.
         """
-        self.QE = np.genfromtxt(path, **kwargs)
+        QE = np.genfromtxt(path, **kwargs)
+        QE[1] *= QE_peak
+        self.QE = QE
 
     def loadDark(self, path: str, **kwargs: Any) -> None:
         """

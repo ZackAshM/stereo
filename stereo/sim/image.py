@@ -11,6 +11,7 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from matplotlib import pyplot as plt
 from matplotlib.colors import LogNorm
+from matplotlib.patches import Circle
 from numpy import logical_and as AND
 from numpy import logical_not as NOT
 from scipy.integrate import simps
@@ -62,8 +63,9 @@ class Image(object):
     mag2pix(table: Table) : astropy.table.Table
         Returns the ra, dec stars table or a given table
         with magnitude values converted to total pixel counts.
-    plot()
-        Minimally plots the image data.
+    plot(vmin: float = 1, vmax: float = None)
+        Minimally plots the image data. Use vmin, vmax to set log range. If
+        vmax is None, vmax is set to the camera's max pixel count.
     """
 
     stars: Table = attr.ib()
@@ -275,6 +277,9 @@ class Image(object):
 
             image_data = np.clip(image_data, 0, self.cam.max_ct)
 
+            # flip horizontally
+            image_data = image_data[:, ::-1]
+
             # and return the image
             self._image = image_data
             return image_data
@@ -302,11 +307,11 @@ class Image(object):
 
         # quantify the magnitudes
         mag = np.array(stars["Mag"])
-        mag_val = mag * u.STmag
+        mag_val = mag * u.ABmag
 
         # convert magnitudes to flux
         flux = mag_val.to(
-            u.photon / u.s / u.cm ** 2 / u.nm, u.spectral_density(550 * u.nm)
+            u.photon / u.s / u.cm ** 2 / u.nm, u.spectral_density(551 * u.nm)
         )
 
         # get the total QE response
@@ -316,6 +321,7 @@ class Image(object):
         else:
             response = 600 * u.nm / u.photon  # 100% from 400nm to 1000nm
 
+        # note: radius in mm -> cm
         aper_area = np.pi * (self.cam.radius * 0.1) ** 2
 
         # calculate the pixel counts
@@ -328,8 +334,34 @@ class Image(object):
         # and return the table
         return stars
 
-    def plot(self) -> None:
-        """Minimally plot the image data."""
+    def plot(
+        self,
+        vmin: float = 1,
+        vmax: float = None,
+        centroids: np.ndarray = None,
+        centroid_radius: float = 20,
+        save: bool = False,
+        filename: str = None,
+    ) -> None:
+        """
+        Plot the image.
+
+        Parameters
+        ----------
+        vmin, vmax : float
+            The min and max passed into the pyplot LogNorm scale.
+        centroids : ndarray
+            The centroids of the image. If not None, returns the image with position
+            annotations.
+        centroid_radius : float
+            The radius of the centroid annotations.
+        save : bool
+            Save the image as a png if true.
+        filename : str
+            The save filename if save is True. Extension is assumed .png. Required
+            if save is True.
+        """
+
         fig, ax = plt.subplots(figsize=[20, 10])
         plt.gray()
         plt.title(
@@ -337,5 +369,19 @@ class Image(object):
                 self.center.ra.value, self.center.dec.value, self.cam.fov[2]
             )
         )
-        ax.imshow(self.image, norm=LogNorm(vmin=1, vmax=self.cam.max_ct))
+        vmax = self.cam.max_ct if vmax is None else vmax
+        ax.imshow(self.image, norm=LogNorm(vmin=vmin, vmax=vmax))
+
+        if centroids is not None:
+            x = centroids[:, 1]
+            y = centroids[:, 0]
+            for xx, yy in zip(x, y):
+                circ = Circle((xx, yy), centroid_radius, ec="red", fill=False)
+                ax.add_patch(circ)
+
+        if save:
+            if filename is None:
+                raise ValueError('When saving image, "filename" argument is required.')
+            plt.savefig(filename + ".png")
+
         plt.show()

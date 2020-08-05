@@ -3,14 +3,15 @@ This module provides a function to run the tetra3 star tracking
 algorithm over given generated starfield images.
 """
 
-from typing import Any, Optional
 import os.path as op
 from pathlib import Path
+from typing import Any, Optional
+
+from astropy import units as u
+from astropy.coordinates import SkyCoord
 
 import tetra3
 from stereo.sim import Image
-from astropy.coordinates import SkyCoord
-from astropy import units as u
 
 
 def run_tetra3(image: Image, **kwargs: Any) -> Optional[SkyCoord]:
@@ -33,7 +34,7 @@ def run_tetra3(image: Image, **kwargs: Any) -> Optional[SkyCoord]:
         Returns None if algorithm fails to estimate a center.
     """
 
-    max_fov = image.cam.fov[2]
+    max_fov = image.cam.fov[2]  # diagonal
     mag_limit = image.mag_limit
 
     t3 = tetra3.Tetra3()
@@ -42,10 +43,13 @@ def run_tetra3(image: Image, **kwargs: Any) -> Optional[SkyCoord]:
         op.dirname(op.dirname(op.dirname(op.abspath(__file__)))), *("data", "tetra3")
     )
     database = Path(
-        op.join(data_directory, "DB_mag{0:0.1f}fov{1:0.1f}".format(max_fov, mag_limit))
+        op.join(data_directory, "mag{0:0.1f}fov{1:0.1f}".format(mag_limit, max_fov))
     )
 
     # load or make appropriate database
+    # NOTE: To generate a database, tetra3 requires the Yale Bright Star
+    # Catalog in its base directory.
+    # Direct download: http://tdc-www.harvard.edu/catalogs/BSC5
     try:
         t3.load_database(database)
     except FileNotFoundError:
@@ -60,10 +64,10 @@ def run_tetra3(image: Image, **kwargs: Any) -> Optional[SkyCoord]:
     result = t3.solve_from_image(image.image, **kwargs)
 
     # return the ra, dec
-    if result['RA'] is None or result['Dec'] is None:
-        print('Tetra3 failed to obtain a result.')
+    if result["RA"] is None or result["Dec"] is None:
+        print("Tetra3 failed to obtain a result.")
         center = None
     else:
-        center = SkyCoord(ra=result['RA'], dec=result['Dec'], unit=u.deg)
+        center = SkyCoord(ra=result["RA"], dec=result["Dec"], unit=u.deg)
 
-    return center
+    return center, result  # remove result later

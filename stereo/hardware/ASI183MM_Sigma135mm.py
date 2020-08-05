@@ -38,7 +38,7 @@ data_directory = op.join(
 
 # load QE and dark current
 QEfile = op.join(data_directory, "ASISigma_QE.csv")
-ASI183MM_Sigma135mm.loadQE(QEfile, unpack=True, delimiter=",")
+ASI183MM_Sigma135mm.loadQE(QEfile, QE_peak=0.84, unpack=True, delimiter=",")
 
 dcfile = op.join(data_directory, "ASISigma_current.csv")
 ASI183MM_Sigma135mm.loadDark(dcfile, unpack=True, delimiter=",")
