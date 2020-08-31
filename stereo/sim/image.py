@@ -164,6 +164,11 @@ class Image(object):
             center_alt = altaz_center.alt.value
             center_az = altaz_center.az.value
 
+            assert AND(-90 <= center_alt, center_alt <= 90), \
+                'Center Alt expected to be between -90 and 90 but is not'
+            assert AND(0 <= center_az, center_az <= 360), \
+                'Center Az expected to be between 0 and 360 but is not'
+
             # define the frame boundaries x=az, y=alt
             xfov, yfov, _ = self.cam.fov
             alt_lo = center_alt - (yfov / 2)
@@ -193,19 +198,17 @@ class Image(object):
             alt_lo, alt_hi = self.image_bounds["alt"]
             az_lo, az_hi = self.image_bounds["az"]
 
+            # avoid mapping image across altitude borders
+            assert alt_hi <= 90, 'Cannot map image across altitude border'
+            assert alt_lo >= -90, 'Cannot map image across altitude border'
+
             # circles means modulo 360
-            alt_lo = alt_lo % 360
-            alt_hi = alt_hi % 360
             az_lo = az_lo % 360
             az_hi = az_hi % 360
-            alt = alt % 360
             az = az % 360
 
             # determine boolean bounds
-            if alt_lo < alt_hi:
-                alt_bound = AND(alt_lo <= alt, alt <= alt_hi)
-            else:
-                alt_bound = NOT(AND(alt_hi <= alt, alt <= alt_lo))
+            alt_bound = AND(alt_lo <= alt, alt <= alt_hi)
 
             if az_lo < az_hi:
                 az_bound = AND(az_lo <= az, az <= az_hi)
@@ -253,8 +256,18 @@ class Image(object):
             azspan = az_hi - az_lo
             altspan = alt_hi - alt_lo
 
+            # if spanning across 0-360 line
+            if az_hi > 360 or az_lo < 0:
+                at360 = (360 - az_lo % 360) / azspan
+                azleft = az[AND(az_lo % 360 <= az, az < 360)]
+                azleftscale = (azleft - az_lo % 360) / azspan
+                azright = az[AND(0 <= az, az <= az_hi % 360)]
+                azrightscale = (azright) / azspan + at360
+                azscale = np.append(azleftscale, azrightscale)
+            else:
+                azscale = (az - az_lo) / azspan
+
             # get the mapping scale
-            azscale = (az - az_lo) / azspan
             altscale = (alt - alt_lo) / altspan
 
             # map the positions to the frame indices
@@ -267,6 +280,9 @@ class Image(object):
 
             # apply Gaussian PSF
             image_data = gaussian_filter(image_data, sigma=self.psf_sigma)
+            if np.max(image_data):
+                ct_scale = self.cam.max_ct / np.max(image_data)
+                image_data *= ct_scale
 
             # add noise and dark current
             image_data += np.random.poisson(self.cam.avg_noise, size=self.size)
