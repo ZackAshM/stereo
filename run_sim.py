@@ -14,10 +14,13 @@ import numpy as np
 
 import random
 
+import stereo.flightpath as flightpath
+
 from astropy.coordinates import SkyCoord
 from astropy import units as u
+from astropy.time import Time
 
-def run_sim(N, trial_name, output = None, star_min = 4, verbose_factor=100):
+def run_sim(N, trial_name, alt0 = 45, output = None, star_min = 4, verbose_factor=100):
     """N = number of non-None points, trial = trial name, output = filename of output,
     star_min = min star count for solve attempt, verbose_factor = print trial progress"""
 
@@ -51,7 +54,7 @@ def run_sim(N, trial_name, output = None, star_min = 4, verbose_factor=100):
     solve_dict = {
         'fov_estimate':fov[0], 
         'fov_max_error':fov_err, 
-        'pattern_checking_stars':-1, 
+        'pattern_checking_stars':7, 
         'match_radius':0.01, 
         'match_threshold':1e-9
     }
@@ -59,6 +62,8 @@ def run_sim(N, trial_name, output = None, star_min = 4, verbose_factor=100):
     ds = 4
     t3 = tetra3.Tetra3()
     t3.load_database(db)
+
+    anita = flightpath.load_flight(4)
     
     # open output
     if output:
@@ -85,8 +90,12 @@ def run_sim(N, trial_name, output = None, star_min = 4, verbose_factor=100):
 
             # get a random center coord from ANITA flight
             ind = random.randrange(0, 37279)
-            obs = load_anita_observation(4, ind)
-            cen_alt = 45 #degrees                                                                                                           
+            lat = anita.latitude[ind]
+            lon = anita.longitude[ind]
+            alt = anita.altitude[ind]
+            time = Time(anita.realTime[ind], format="unix")
+            obs = Observation(lat=lat, lon=lon, alt=alt, time=time)
+            cen_alt = alt0 #degrees
             cen_az = random.randrange(0, 360) # degrees                                                                                     
             altaz = obs.altaz_frame
             center_radec = SkyCoord(alt=cen_alt, az=cen_az, unit=u.deg, frame=altaz).transform_to('icrs') 
@@ -260,7 +269,7 @@ def run_sim(N, trial_name, output = None, star_min = 4, verbose_factor=100):
         # End
     
     # return what's there so far if interrupted
-    except KeyboardInterrupt:
+    except:
 
         total_t = (timestamp() - total_t0) / 60 / 60
         
@@ -311,4 +320,4 @@ def run_sim(N, trial_name, output = None, star_min = 4, verbose_factor=100):
         # End
 
 # run the monte carlo
-run_sim(100, 'RUN1', output='data/images/RUN1.txt', star_min=4, verbose_factor=100)
+run_sim(100, 'RUN_', output='data/images/RUN_.txt', alt0=45, star_min=4, verbose_factor=100)

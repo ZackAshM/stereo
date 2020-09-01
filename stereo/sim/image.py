@@ -133,50 +133,76 @@ class Image(object):
             # return result
             self._altaz_stars = altaz_table
             return altaz_table
+        
+    @property
+    def proj_stars(self) -> Table:
+        """
+        Convert the (ra, dec) coordinates in a given astropy table
+        of stars with columns 'ra', 'dec', and 'Mag' to image projected
+        coordinates using the center ra, dec.
+
+        Returns
+        -------
+        proj_table : astropy.table.Table
+            The converted table with column coordinates 'y' and 'x' in 
+            units per focal length, and magnitude column 'Mag'.
+        """
+
+        try:
+            return self._proj_stars  # type: ignore
+        except AttributeError:
+
+            # make the table for projected coords
+            proj_table = Table(self.stars, names=["y", "x", "Mag"], copy=True)
+            
+            # get star ra, dec coords
+            ra, dec = self.stars['ra'], self.stars['dec']
+            
+            # get the projected coordinates
+            x, y = self.radec2proj(ra=ra, dec=dec)
+
+            # set table values to the transformed coords
+            proj_table["y"] = y / u.deg
+            proj_table["x"] = x / u.deg
+
+            # return result
+            self._proj_stars = proj_table
+            return proj_table
+
 
     @property
     def image_bounds(self) -> Dict[str, Tuple[float, float]]:
         """
-        Returns the alt, az bounds of the image.
+        Returns the projected x, y bounds of the image.
 
         Returns
         -------
         bounds : Dict[str, Tuple[float, float]]
-            The dictionary containing the 'alt' and 'az' bounds as (lower, upper)
+            The dictionary containing the 'x' and 'y' bounds as (lower, upper)
             tuples.
 
         Raises
         ------
         ValueError
-            If Camera or Observation object attributions are not set.
+            If Camera object attribution is not set.
         """
         try:
             return self._image_bounds  # type: ignore
         except AttributeError:
-            if None in [self.cam, self.observation]:
+            if self.cam is None:
                 raise ValueError(
-                    "Camera and Observation objects required to"
-                    + " determine image bounds"
+                    "Camera object required to determine image bounds"
                 )
+                
+            cen_x, cen_y = self.radec2proj(radec=self.center)
 
-            # use alt, az stars
-            altaz_center = self.center.transform_to(self.observation.altaz_frame)
-            center_alt = altaz_center.alt.value
-            center_az = altaz_center.az.value
-
-            assert AND(-90 <= center_alt, center_alt <= 90), \
-                'Center Alt expected to be between -90 and 90 but is not'
-            assert AND(0 <= center_az, center_az <= 360), \
-                'Center Az expected to be between 0 and 360 but is not'
-
-            # define the frame boundaries x=az, y=alt
             xfov, yfov, _ = self.cam.fov
-            alt_lo = center_alt - (yfov / 2)
-            alt_hi = center_alt + (yfov / 2)
-            az_lo = center_az - (xfov / 2)
-            az_hi = center_az + (xfov / 2)
+            x_lo = cen_x - np.tan(xfov * (np.pi / 180) / 2)
+            x_hi = cen_x + np.tan(xfov * (np.pi / 180) / 2)
+            y_lo = cen_y - np.tan(yfov * (np.pi / 180) / 2)
+            y_hi = cen_y + np.tan(yfov * (np.pi / 180) / 2)
 
-            bounds = {"alt": (alt_lo, alt_hi), "az": (az_lo, az_hi)}
+            bounds = {"x": (x_lo, x_hi), "y": (y_lo, y_hi)}
 
             # return the boundaries
             self._image_bounds = bounds
@@ -190,33 +216,20 @@ class Image(object):
         except AttributeError:
 
             # get alt, az and bounds
-            star_table = Table(self.altaz_stars, copy=True)
+            star_table = Table(self.proj_stars, copy=True)
 
-            alt = star_table["alt"]
-            az = star_table["az"]
+            x = star_table["x"]
+            y = star_table["y"]
 
-            alt_lo, alt_hi = self.image_bounds["alt"]
-            az_lo, az_hi = self.image_bounds["az"]
-
-            # avoid mapping image across altitude borders
-            assert alt_hi <= 90, 'Cannot map image across altitude border'
-            assert alt_lo >= -90, 'Cannot map image across altitude border'
-
-            # circles means modulo 360
-            az_lo = az_lo % 360
-            az_hi = az_hi % 360
-            az = az % 360
-
+            x_lo, x_hi = self.image_bounds["x"]
+            y_lo, y_hi = self.image_bounds["y"]
+            
             # determine boolean bounds
-            alt_bound = AND(alt_lo <= alt, alt <= alt_hi)
-
-            if az_lo < az_hi:
-                az_bound = AND(az_lo <= az, az <= az_hi)
-            else:
-                az_bound = NOT(AND(az_hi <= az, az <= az_lo))
+            x_bound = AND(x_lo <= x, x <= x_hi)
+            y_bound = AND(y_lo <= y, y <= y_hi)
 
             # remove stars outside the bounds
-            bound = np.logical_and(alt_bound, az_bound)
+            bound = np.logical_and(y_bound, x_bound)
             stars = star_table[bound]
 
             # and return them
@@ -243,39 +256,23 @@ class Image(object):
             image_stars = self.image_stars
             stars = self.mag2pix(image_stars)
 
-            alt = stars["alt"]
-            az = stars["az"]
+            x = stars["x"]
+            y = stars["y"]
             ct = stars["Total Counts"]
 
             height, width = self.size
             image_data = np.zeros((height, width))
 
             # get the span of alt, az positions
-            alt_lo, alt_hi = self.image_bounds["alt"]
-            az_lo, az_hi = self.image_bounds["az"]
-            azspan = az_hi - az_lo
-            altspan = alt_hi - alt_lo
-
-            # if spanning across 0-360 line
-            if az_hi > 360 or az_lo < 0:
-                at360 = (360 - az_lo % 360) / azspan
-                azleft = az[AND(az_lo % 360 <= az, az < 360)]
-                azleftscale = (azleft - az_lo % 360) / azspan
-                azright = az[AND(0 <= az, az <= az_hi % 360)]
-                azrightscale = (azright) / azspan + at360
-                azscale = np.append(azleftscale, azrightscale)
-            else:
-                azscale = (az - az_lo) / azspan
-
-            # get the mapping scale
-            altscale = (alt - alt_lo) / altspan
-
-            # map the positions to the frame indices
-            azind = np.round_(azscale * (width - 1)).astype(int)
-            altind = np.round_(altscale * (height - 1)).astype(int)
+            x_lo, x_hi = self.image_bounds["x"]
+            y_lo, y_hi = self.image_bounds["y"]
+            
+            # map to pixels
+            xind = np.interp(x, (x_lo, x_hi), (0.5, width+0.5)).astype(int)
+            yind = np.interp(y, (y_lo, y_hi), (0.5, height+0.5)).astype(int)
 
             # set pixel values at star pixel positions
-            for i in zip(altind, azind, ct):
+            for i in zip(yind, xind, ct):
                 image_data[i[0], i[1]] = i[2]
 
             # apply Gaussian PSF
@@ -299,6 +296,26 @@ class Image(object):
             # and return the image
             self._image = image_data
             return image_data
+        
+    def radec2proj(self, radec: SkyCoord = None, ra: float = None, dec: float = None) -> Tuple[float, float]:
+        """Convert ra, dec coordinates to the image projection coordinates in units per focal length."""
+        
+        # get center and star ra, dec coords
+        cen_ra, cen_dec = self.center.ra.value*(np.pi / 180), self.center.dec.value*(np.pi / 180)
+        if ra is None and dec is None:
+            ra, dec = radec.ra.value, radec.dec.value
+            
+        ra = ra * (np.pi / 180)
+        dec = dec * (np.pi / 180)
+        
+        # calculate projection coords:
+        # https://phys.libretexts.org/Bookshelves/Astronomy__Cosmology/Book%3A_Celestial_Mechanics_(Tatum)/11%3A_Photographic_Astrometry/11.02%3A_Standard_Coordinates_and_Plate_Constants
+        x = np.sin(ra - cen_ra) / ( np.sin(cen_dec) * np.tan(dec) 
+                                   + np.cos(cen_dec) * np.cos(ra - cen_ra) )
+        y = ( np.tan(dec) - np.tan(cen_dec) * np.cos(ra - cen_ra) ) / ( 
+            np.tan(cen_dec) * np.tan(dec) + np.cos(ra - cen_ra) )
+        
+        return (x, y)
 
     def mag2pix(self, table: Table = None) -> Table:
         """
