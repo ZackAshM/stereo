@@ -13,7 +13,6 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import LogNorm
 from matplotlib.patches import Circle
 from numpy import logical_and as AND
-from numpy import logical_not as NOT
 from scipy.integrate import simps
 from scipy.ndimage import gaussian_filter
 
@@ -34,38 +33,50 @@ class Image(object):
         The table of stars 'ra', 'dec', and 'Mag'. Not necessarily the
         stars shown within the image.
     center : astropy.coordinates.SkyCoord
-        The sky coordinates of the center of the image.
+        The ra, dec sky coordinates of the center of the image.
     observation : Observation
         The Observation object.
     cam : Camera
         The Camera object.
     mag_limit : float
-        The most dim magnitude cutoff. Default = max magnitude in stars['Mag'].
+        The dimmest magnitude cutoff. Default = max magnitude in stars['Mag'].
     psf_sigma : float
-        The standard deviation of the Gaussian PSF in pixels. Default = 2.
+        The standard deviation of the Gaussian PSF in pixels. Default = 3.
 
     Properties
     ----------
     size : Tuple[int, int]
         The size of the image frame in pixels.
     altaz_stars : astropy.table.Table
-        The table of stars 'alt', 'az', 'Mag'.
+        The table of stars in 'alt', 'az', 'Mag'.
+    proj_stars : astropy.table.Table
+        The table of stars projected in 'x', 'y', 'Mag'.
     image_bounds : Dict[str, Tuple[float, float]]
-        The alt, az bounds of the image.
+        The projected x, y bounds of the image.
     image_stars : astropy.table.Table
-        The table of stars 'alt', 'az', 'Mag' shown in the image.
+        The table of stars 'x', 'y', 'Mag' within the image bounds.
     image : numpy.ndarray
         The ndarray of a pixel grid containing pixel values
         corresponding to the location and magnitudes of the stars.
 
     Methods
     -------
+    radec2proj(radec: SkyCoord = None,
+               ra: float = None,
+               dec: float = None) : Tuple[float, float]
+        Converts given ra, dec coordinates to image projection coordinates.
     mag2pix(table: Table) : astropy.table.Table
         Returns the ra, dec stars table or a given table
         with magnitude values converted to total pixel counts.
-    plot(vmin: float = 1, vmax: float = None)
-        Minimally plots the image data. Use vmin, vmax to set log range. If
+    plot(vmin: float = 1,
+         vmax: float = None,
+         centroids: ndarray = None,
+         centroid_radius: float = 20,
+         filename: str = None)
+        Plots the image. Use vmin, vmax to set log range. If
         vmax is None, vmax is set to the camera's max pixel count.
+        If centroids is given, plots circle annotations at given
+        centroid locations. Saves the plot as filename if not None.
     """
 
     stars: Table = attr.ib()
@@ -73,7 +84,7 @@ class Image(object):
     observation: Observation = attr.ib(default=None)
     cam: Camera = attr.ib(default=None)
     mag_limit: float = attr.ib()
-    psf_sigma: float = attr.ib(default=2)
+    psf_sigma: float = attr.ib(default=3)
 
     @mag_limit.default
     def mag_limit_default(self) -> float:
@@ -133,18 +144,18 @@ class Image(object):
             # return result
             self._altaz_stars = altaz_table
             return altaz_table
-        
+
     @property
     def proj_stars(self) -> Table:
         """
         Convert the (ra, dec) coordinates in a given astropy table
         of stars with columns 'ra', 'dec', and 'Mag' to image projected
-        coordinates using the center ra, dec.
+        coordinates x, y.
 
         Returns
         -------
         proj_table : astropy.table.Table
-            The converted table with column coordinates 'y' and 'x' in 
+            The converted table with column coordinates 'y' and 'x' in
             units per focal length, and magnitude column 'Mag'.
         """
 
@@ -154,10 +165,10 @@ class Image(object):
 
             # make the table for projected coords
             proj_table = Table(self.stars, names=["y", "x", "Mag"], copy=True)
-            
+
             # get star ra, dec coords
-            ra, dec = self.stars['ra'], self.stars['dec']
-            
+            ra, dec = self.stars["ra"], self.stars["dec"]
+
             # get the projected coordinates
             x, y = self.radec2proj(ra=ra, dec=dec)
 
@@ -168,7 +179,6 @@ class Image(object):
             # return result
             self._proj_stars = proj_table
             return proj_table
-
 
     @property
     def image_bounds(self) -> Dict[str, Tuple[float, float]]:
@@ -190,10 +200,8 @@ class Image(object):
             return self._image_bounds  # type: ignore
         except AttributeError:
             if self.cam is None:
-                raise ValueError(
-                    "Camera object required to determine image bounds"
-                )
-                
+                raise ValueError("Camera object required to determine image bounds")
+
             cen_x, cen_y = self.radec2proj(radec=self.center)
 
             xfov, yfov, _ = self.cam.fov
@@ -210,7 +218,7 @@ class Image(object):
 
     @property
     def image_stars(self) -> Table:
-        """Returns the 'alt', 'az', and 'Mag' table of stars shown in the image."""
+        """Returns the 'x', 'y', and 'Mag' table of stars within the image bounds."""
         try:
             return self._image_stars  # type: ignore
         except AttributeError:
@@ -223,7 +231,7 @@ class Image(object):
 
             x_lo, x_hi = self.image_bounds["x"]
             y_lo, y_hi = self.image_bounds["y"]
-            
+
             # determine boolean bounds
             x_bound = AND(x_lo <= x, x <= x_hi)
             y_bound = AND(y_lo <= y, y <= y_hi)
@@ -240,7 +248,7 @@ class Image(object):
     def image(self) -> np.ndarray:
         """
         Returns the ndarray containing pixel values corresponding to
-        positions and magnitudes in self.stars with a Gaussian PSF.
+        positions and magnitudes in self.stars assuming a Gaussian PSF.
 
         Returns
         -------
@@ -263,13 +271,12 @@ class Image(object):
             height, width = self.size
             image_data = np.zeros((height, width))
 
-            # get the span of alt, az positions
             x_lo, x_hi = self.image_bounds["x"]
             y_lo, y_hi = self.image_bounds["y"]
-            
+
             # map to pixels
-            xind = np.interp(x, (x_lo, x_hi), (0.5, width+0.5)).astype(int)
-            yind = np.interp(y, (y_lo, y_hi), (0.5, height+0.5)).astype(int)
+            xind = np.interp(x, (x_lo, x_hi), (0.5, width + 0.5)).astype(int)
+            yind = np.interp(y, (y_lo, y_hi), (0.5, height + 0.5)).astype(int)
 
             # set pixel values at star pixel positions
             for i in zip(yind, xind, ct):
@@ -290,31 +297,48 @@ class Image(object):
 
             image_data = np.clip(image_data, 0, self.cam.max_ct)
 
-            # flip horizontally
-            image_data = image_data[:, ::-1]
+            # flip horizontally and vertically
+            image_data = image_data[::-1, ::-1]
 
             # and return the image
             self._image = image_data
             return image_data
-        
-    def radec2proj(self, radec: SkyCoord = None, ra: float = None, dec: float = None) -> Tuple[float, float]:
-        """Convert ra, dec coordinates to the image projection coordinates in units per focal length."""
-        
+
+    def radec2proj(
+        self, radec: SkyCoord = None, ra: float = None, dec: float = None
+    ) -> Tuple[float, float]:
+        """
+        Convert ra, dec coordinates to the image projection
+        coordinates in units per focal length. Coordinates
+        can be given separately or as one SkyCoord object.
+        """
+
         # get center and star ra, dec coords
-        cen_ra, cen_dec = self.center.ra.value*(np.pi / 180), self.center.dec.value*(np.pi / 180)
-        if ra is None and dec is None:
+        cen_ra, cen_dec = (
+            self.center.ra.value * (np.pi / 180),
+            self.center.dec.value * (np.pi / 180),
+        )
+
+        if radec is not None:
             ra, dec = radec.ra.value, radec.dec.value
-            
+        elif ra is None:
+            raise ValueError(
+                "Class Image method radec2proj was given no ra or dec coordinates"
+            )
+
         ra = ra * (np.pi / 180)
         dec = dec * (np.pi / 180)
-        
-        # calculate projection coords:
+
+        # calculate projection coords
         # https://phys.libretexts.org/Bookshelves/Astronomy__Cosmology/Book%3A_Celestial_Mechanics_(Tatum)/11%3A_Photographic_Astrometry/11.02%3A_Standard_Coordinates_and_Plate_Constants
-        x = np.sin(ra - cen_ra) / ( np.sin(cen_dec) * np.tan(dec) 
-                                   + np.cos(cen_dec) * np.cos(ra - cen_ra) )
-        y = ( np.tan(dec) - np.tan(cen_dec) * np.cos(ra - cen_ra) ) / ( 
-            np.tan(cen_dec) * np.tan(dec) + np.cos(ra - cen_ra) )
-        
+        x = np.sin(ra - cen_ra) / (
+            np.sin(cen_dec) * np.tan(dec) + np.cos(cen_dec) * np.cos(ra - cen_ra)
+        )
+        y = (np.tan(dec) - np.tan(cen_dec) * np.cos(ra - cen_ra)) / (
+            np.tan(cen_dec) * np.tan(dec) + np.cos(ra - cen_ra)
+        )
+
+        # and return the new coordinates
         return (x, y)
 
     def mag2pix(self, table: Table = None) -> Table:
@@ -332,20 +356,23 @@ class Image(object):
             The table containing pixel values corresponding to the magnitudes.
         """
 
+        if self.cam is None:
+            raise ValueError("Camera object required to determine pixel counts")
+
         # get the desired star table
         if table is not None:
             stars = Table(table, copy=True)
         else:
             stars = Table(self.stars, copy=True)
 
-        # quantify the magnitudes
-        mag = np.array(stars["Mag"])
-        mag_val = mag * u.ABmag
-
         # convert magnitudes to flux
-        flux = mag_val.to(
-            u.photon / u.s / u.cm ** 2 / u.nm, u.spectral_density(551 * u.nm)
+        mag = np.array(stars["Mag"])  # Vmag
+        wav_V = 551 * u.nm
+        flux_V0 = (3640 * u.Jy).to(
+            u.photon / u.nm / u.cm / u.cm / u.s, equivalencies=u.spectral_density(wav_V)
         )
+        Vflux = 10.0 ** (-0.4 * mag)
+        flux = flux_V0 * Vflux
 
         # get the total QE response
         QE = self.cam.QE
@@ -373,7 +400,6 @@ class Image(object):
         vmax: float = None,
         centroids: np.ndarray = None,
         centroid_radius: float = 20,
-        save: bool = False,
         filename: str = None,
     ) -> None:
         """
@@ -388,11 +414,9 @@ class Image(object):
             annotations.
         centroid_radius : float
             The radius of the centroid annotations.
-        save : bool
-            Save the image as a png if true.
         filename : str
-            The save filename if save is True. Extension is assumed .png. Required
-            if save is True.
+            If given, saves the image with this filename.
+            Extension is assumed .png.
         """
 
         fig, ax = plt.subplots(figsize=[20, 10])
@@ -412,9 +436,7 @@ class Image(object):
                 circ = Circle((xx, yy), centroid_radius, ec="red", fill=False)
                 ax.add_patch(circ)
 
-        if save:
-            if filename is None:
-                raise ValueError('When saving image, "filename" argument is required.')
+        if filename:
             plt.savefig(filename + ".png")
 
         plt.show()

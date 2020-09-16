@@ -1,7 +1,11 @@
+"""
+Open and view items in a tetra3 database.
+"""
+
 from numpy import load
 
-data = load('tetra3/default_database.npz')
-# data = load('stereo/data/tetra3/mag6.7fov7.npz')
+database = 'tetra3/default_database.npz'
+data = load(database)
 
 lst = data.files 
 

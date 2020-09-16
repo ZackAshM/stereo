@@ -23,7 +23,7 @@ black:
 	${PYTHON} -m black -t py37 stereo tests
 
 isort:
-	${PYTHON} -m isort --atomic -rc -y stereo tests
+	${PYTHON} -m isort --atomic stereo tests
 
 mypy:
 	${PYTHON} -m mypy stereo
