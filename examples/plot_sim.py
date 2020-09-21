@@ -5,9 +5,47 @@ Plots the data obtained from run_sim.py or run_sim.sh
 import numpy as np
 from scipy.stats import norm
 import matplotlib.pyplot as plt
+from matplotlib import cm
 plt.rcParams.update({'font.size': 20})
 import argparse
+import glob
 import os.path as op
+data_dir = op.join(op.dirname(op.dirname(op.abspath(__file__))), *("data", "sim"))
+
+def get_header(filename):
+    """Return the header and header dict of run_sim.py data logs"""
+    header = ""
+    header_dict = {}
+    with open(filename, 'rt') as file:
+        for line in file:
+            if '#' not in line:
+                break
+            header += line[2:]
+            _temp = line.split()
+            if "Total Number" in line:
+                header_dict['total_number'] = _temp[5]
+            elif "Solved Trials" in line:
+                header_dict['solved_tot'] = float(_temp[3][:-1])
+                header_dict['solved_per_solve'] = float(_temp[4][:-1])
+                header_dict['solved_per_tot'] = float(_temp[8][:-1])
+            elif "Solver Fails" in line:
+                header_dict['fail_tot'] = float(_temp[3][:-1])
+                header_dict['fail_per_solve'] = float(_temp[4][:-1])
+                header_dict['fail_per_tot'] = float(_temp[8][:-1])
+            elif "Timeout Fails" in line:
+                header_dict['timeout_tot'] = float(_temp[3][:-1])
+                header_dict['timeout_per_solve'] = float(_temp[4][:-1])
+                header_dict['timeout_per_tot'] = float(_temp[8][:-1])
+            elif "Low Star Counts" in line:
+                header_dict['low_ct_tot'] = float(_temp[5][:-1])
+                header_dict['low_ct_per'] = float(_temp[6][:-1])
+            elif "Time" in line:
+                header_dict['tot_time'] = float(_temp[5])
+            elif "skip_header" in line:
+                header_dict['skip_header'] = int(float(_temp[3]))
+            elif "SNR:" in line:
+                header_dict['snr'] = float(_temp[2])
+    return header, header_dict
 
 def analyze_alt_error(alt_err, bins='auto', arcsec=True, save=None):
     """
@@ -43,14 +81,14 @@ def analyze_alt_error(alt_err, bins='auto', arcsec=True, save=None):
     plt.grid(True, axis='y')
 
     if save:
-        plt.savefig(save)
+        plt.savefig(save, bbox_inches='tight', pad_inches=0)
     
     #plot
     # plt.show()
 
     return mu, sigma
 
-def plot_ct(star_ct_col, solve_bool_col, normalize=True, line=False, save=None):
+def plot_ct(star_ct_col, solve_bool_col, normalize=True, line=False, save=None, plot=True):
     """
     star_ct_col=the data column of star counts, solve_bool_col=the data column
     describing the solve status, normalize=if True, convert hist data to percentages,
@@ -120,31 +158,34 @@ def plot_ct(star_ct_col, solve_bool_col, normalize=True, line=False, save=None):
             except ZeroDivisionError:
                 continue
 
-    # plot graph
-    fig, ax = plt.subplots(figsize=[20, 10])
-
-    ax.set(xlabel='Star Count', ylabel='{0}Amount Solved/Failed/Timeout'.format('Relative ' if normalize else ''), 
-           title='tetra3 Performance for Different Star Counts')
-    
-    if line:
-        plt.plot(*ct_solved, label='Solved', color='green', marker='o', alpha=0.8)
-        plt.plot(*ct_failed, label='Failed', color='red', marker='o', alpha=0.75)
-        plt.plot(*ct_timeout, label='Timed Out', color='gray', marker='o', alpha=0.8)
+    if not plot:
+        return cts, ct_solved[1], ct_failed[1], ct_timeout[1]
     else:
-        bar_width = np.min(np.diff(cts))/4
-        ct_solved[0] += -bar_width
-        plt.bar(*ct_solved, bar_width, label='Solved', color='green', linewidth=2, edgecolor='black', alpha=0.8)
-        plt.bar(*ct_failed, bar_width, label='Failed', color='red', linewidth=2, edgecolor='black', alpha=0.75)
-        ct_timeout[0] += bar_width
-        plt.bar(*ct_timeout, bar_width, label='Timed Out', color='gray', linewidth=2, edgecolor='black', alpha=0.8)
-    
-    plt.legend(loc='upper right')
-    plt.grid(True, axis='y')
+        # plot graph
+        fig, ax = plt.subplots(figsize=[20, 10])
 
-    if save:
-        plt.savefig(save)
+        ax.set(xlabel='Star Count', ylabel='{0}Amount Solved/Failed/Timeout'.format('Relative ' if normalize else ''), 
+               title='tetra3 Performance for Different Star Counts')
 
-    # plt.show()
+        if line:
+            plt.plot(*ct_solved, label='Solved', color='green', marker='o', alpha=0.8)
+            plt.plot(*ct_failed, label='Failed', color='red', marker='o', alpha=0.75)
+            plt.plot(*ct_timeout, label='Timed Out', color='gray', marker='o', alpha=0.8)
+        else:
+            bar_width = np.min(np.diff(cts))/4
+            ct_solved[0] += -bar_width
+            plt.bar(*ct_solved, bar_width, label='Solved', color='green', linewidth=2, edgecolor='black', alpha=0.8)
+            plt.bar(*ct_failed, bar_width, label='Failed', color='red', linewidth=2, edgecolor='black', alpha=0.75)
+            ct_timeout[0] += bar_width
+            plt.bar(*ct_timeout, bar_width, label='Timed Out', color='gray', linewidth=2, edgecolor='black', alpha=0.8)
+
+        plt.legend(loc='upper right')
+        plt.grid(True, axis='y')
+
+        if save:
+            plt.savefig(save, bbox_inches='tight', pad_inches=0)
+
+        # plt.show()
     
 def analyze_solve_time(star_ct_col, solve_time_col, solve_bool_col, save=None):
     """
@@ -175,15 +216,172 @@ def analyze_solve_time(star_ct_col, solve_time_col, solve_bool_col, save=None):
     plt.errorbar(*data, yerr=solve_time_err, fmt='o', capsize=5, c='blue')
     
     if save:
-        plt.savefig(save)
+        plt.savefig(save, bbox_inches='tight', pad_inches=0)
     
     # plt.show()
 
+def analyze_param(param: str, filenames, savename, p_alt_err: bool = True, p_perf: bool = True, p_time: bool = True):
+    """Plot Alt_err vs param, Perf vs star ct vs param, and solve time vs star ct vs param"""
+
+    data_dict = {}
+    rates = {}
+    par_vals = []
+    for FILE in filenames:
+         hdr_dict = get_header(FILE)[1]
+         solve_rate = hdr_dict['solved_per_solve']
+         fail_rate = hdr_dict['fail_per_solve']
+         timeout_rate = hdr_dict['timeout_per_solve']
+         par_val = hdr_dict[param]
+
+         rates[str(hdr_dict[param])] = np.array([solve_rate, fail_rate, timeout_rate])
+         par_vals.append(par_val)
+         
+         data = np.genfromtxt(FILE, unpack=True, skip_header=hdr_dict['skip_header'])
+         alt_err = data[2]
+         star_ct = data[4]
+         solve_bool = data[1]
+         solve_time = data[9]
+
+         data_dict[str(par_val)] = np.array([alt_err, star_ct, solve_bool, solve_time])
+    par_vals = np.array(par_vals)
+
+    def param_alt_err(data_dict, par_vals, save):
+        """Plot alt_err vs param"""
+
+        # extract the mean and std
+        altdata = []
+        for par in data_dict:
+            # append [mu, sigma]
+            alt = data_dict[par][0]
+            alt = alt[alt!=-999]*60*60
+            altdata.append(np.array(norm.fit(alt)))
+        altdata = np.array(altdata).T    
+            
+        # plot
+        fig, ax = plt.subplots(figsize=[15, 10])
+
+        ax.set(xlabel=param, ylabel='Altitude Error ["]', 
+               title='Altitude Error vs {0}'.format(param))
+        plt.xscale('log')
+
+        plt.errorbar(par_vals, altdata[0], yerr=altdata[1], fmt='o', capsize=5, c='black', alpha=0.8)
+        plt.grid(True)
+
+        if save:
+            plt.savefig(save, bbox_inches='tight', pad_inches=0)
+
+        #plot
+        # plt.show()
+
+    def param_perf(data_dict, rates, par_vals, savename):
+
+        # extract rates
+        ratedata = []
+        for par in rates:
+            ratedata.append(np.array(rates[par]))
+        ratedata = np.array(ratedata).T
+        plotdata = np.array([[p, s, f, t] for p,s,f,t in sorted(zip(par_vals,*ratedata))], dtype=float).T
+        
+        # plot rates
+        fig, ax = plt.subplots(figsize=[15, 10])
+
+        ax.set(xlabel=param, ylabel='Percentage Solved/Failed/Timeout', 
+               title='Solve Rates vs {0}'.format(param))
+        plt.xscale('log')
+
+        x = plotdata[0]
+        plt.plot(x, plotdata[1], label='Solved', color='green', marker='o', alpha=0.8)
+        plt.plot(x, plotdata[2], label='Failed', color='red', marker='o', alpha=0.75)
+        plt.plot(x, plotdata[3], label='Timed Out', color='gray', marker='o', alpha=0.8)
+
+        plt.grid(True)
+        plt.legend(loc='upper right')
+
+        if savename:
+            save = "{0}_perfrate.png".format(savename)
+            plt.savefig(save, bbox_inches='tight', pad_inches=0)
+
+        #plot
+        # plt.show()
+
+        # plot solve performance
+        fig2, ax2 = plt.subplots(figsize=[15, 10])
+        ax2.set(xlabel='Star Count', ylabel='Relative Amount Solved', 
+                title='Solve Performance vs Star Count at Different {0}'.format(param))
+        plt.grid(True)
+
+        # set color map
+        evenly_spaced_interval = np.linspace(0, 1, len(x))
+        colors = [cm.rainbow(i) for i in evenly_spaced_interval]
+
+        for par in range(len(x)):
+            ind = str(float(x[par]))
+            star_ct_col = data_dict[ind][1]
+            solve_bool_col = data_dict[ind][2]
+            xdata, ydata, _, _ = plot_ct(star_ct_col, solve_bool_col, normalize=True, plot=False)
+            plt.plot(xdata, ydata, label=ind, marker='o', color=colors[par], alpha=0.8)
+        handles, labels = ax2.get_legend_handles_labels()
+        plt.legend(handles[::-1], labels[::-1], title=param, loc='lower right')
+        
+        if savename:
+            save = "{0}_perf.png".format(savename)
+            plt.savefig(save, bbox_inches='tight', pad_inches=0)
+
+    def param_time(data_dict, par_vals, savename):
+
+        fig, ax = plt.subplots(figsize=[15, 10])
+        ax.set(xlabel='Star Count', ylabel='Solve Time [ms]', 
+               title='Solve Time vs Star Counts at Different {0}'.format(param))
+        plt.grid()
+
+        # set color map
+        evenly_spaced_interval = np.linspace(0, 1, len(par_vals))
+        colors = [cm.rainbow(i) for i in evenly_spaced_interval]
+
+        par_vals = sorted(par_vals)
+        
+        for par in (0, -1):
+
+            ind = str(float(par_vals[par]))
+            star_ct_col = data_dict[ind][1]
+            solve_time_col = data_dict[ind][3]
+            solve_bool_col = data_dict[ind][2]
+            
+            # extract relevant data
+            star_ct0 = star_ct_col[solve_bool_col == 1]
+            solve_time0 = solve_time_col[solve_bool_col == 1]
+
+            star_ct  = np.unique(star_ct0)
+            solve_time = np.array([np.mean(solve_time0[star_ct0==ct]) for ct in star_ct])
+            solve_time_err = np.array([np.std(solve_time0[star_ct0==ct]) for ct in star_ct])
+
+            data = np.array([[x, y] for x,y in sorted(zip(star_ct, solve_time))], dtype=float).T
+
+            plt.errorbar(*data, yerr=solve_time_err, fmt='o', capsize=5, label=ind, c=colors[par])
+
+        handles, labels = ax.get_legend_handles_labels()
+        plt.legend(handles[::-1], labels[::-1], title=param, loc='upper right')
+            
+        if savename:
+            plt.savefig(savename, bbox_inches='tight', pad_inches=0)
+
+            
+    if p_alt_err:
+        SAVE = "{0}_alterr.png".format(savename)
+        param_alt_err(data_dict, par_vals, SAVE)
+
+    if p_perf:
+        param_perf(data_dict, rates, par_vals, savename)
+
+    if p_time:
+        SAVE = "{0}_time.png".format(savename)
+        param_time(data_dict, par_vals, SAVE)
+    
 # command line arguments
 parser = argparse.ArgumentParser(
-    description='Plots the run_sim.py data. Use the options to decide which plots to save. Options include the histogram of the altitude error, the plot of the solve/fail/timeout performance of tetra3 across star counts, and the solve time across star counts.')
+    description='Plots the run_sim.py data. Use the options to decide which plots to save or none to plot all. Options include the histogram of the altitude error, the plot of the solve/fail/timeout performance of tetra3 across star counts, and the solve time across star counts. Use --param to perform the analysis across multiple data with a varying specific parameter whose filenames contain a common string (ie. SNR10.txt, SNR1.txt, SNR0.1.txt,...). Note that the data is assumed to be in the data/sim/ directory.')
 parser.add_argument('DATA_NAME', type=str,
-                    help='str; the name of the data file, .txt extension assumed')
+                    help='str; the name of the data file, .txt extension assumed. If --snr active, this is the name of the common basename of snr data files.')
 parser.add_argument('SAVE_NAME', type=str,
                     help='str; the common name of the saved pngs')
 parser.add_argument('-e', '--error', action='store_true',
@@ -192,60 +390,46 @@ parser.add_argument('-p', '--perf', action='store_true',
                     help='flag; plot the solve/fail/timeout performance')
 parser.add_argument('-t', '--time', action='store_true',
                     help='flag; plot the solve time vs star count')
-parser.add_argument('-a', '--all', action='store_true',
-                    help='flag; plot all')
+parser.add_argument('--param', type=str, choices=['none','snr','rotation'], default='none',
+                    help='str; analyze list of data files differing in this specific parameter')
 args = parser.parse_args()
 
-data_dir = op.join(op.dirname(op.dirname(op.abspath(__file__))), *("data", "images"))
-FILE = "{0}/{1}.txt".format(data_dir, args.DATA_NAME)
-SAVE = "{0}/{1}".format(data_dir, args.SAVE_NAME)
+if args.param == 'none':
 
-# obtain header information to print
-header = ""
-with open(FILE, 'rt') as file:
-    for line in file:
-        if '#' not in line:
-            break
-        header += line[2:]
-        _temp = line.split()
-        if "Total Number" in line: 
-            total_number = _temp[5]
-        elif "Solved Trials" in line:
-            solved_tot = float(_temp[3][:-1])
-            solved_per_solve = float(_temp[4][:-1])
-            solved_per_tot = float(_temp[8][:-1])
-        elif "Solver Fails" in line:
-            fail_tot = float(_temp[3][:-1])
-            fail_per_solve = float(_temp[4][:-1])
-            fail_per_tot = float(_temp[8][:-1])
-        elif "Timeout Fails" in line:
-            timeout_tot = float(_temp[3][:-1])
-            timeout_per_solve = float(_temp[4][:-1])
-            timeout_per_tot = float(_temp[8][:-1])
-        elif "Low Star Counts" in line:
-            low_ct_tot = float(_temp[5][:-1])
-            low_ct_per = float(_temp[6][:-1])
-        elif "Time" in line:
-            tot_time = float(_temp[5])
-        elif "skip_header" in line:
-            skip_header = int(_temp[3])
-        
-data = np.genfromtxt(FILE, unpack=True, skip_header=skip_header)
+    plot_all = False if args.error or args.perf or args.time else True
+    
+    FILE = "{0}/{1}.txt".format(data_dir, args.DATA_NAME)
+    SAVE = "{0}/{1}".format(data_dir, args.SAVE_NAME)
 
-alt_err = data[2]
-star_ct = data[4]
-solve_bool = data[1]
-solve_time = data[9]
+    hdr, hdr_dict = get_header(FILE)
+    
+    data = np.genfromtxt(FILE, unpack=True, skip_header=hdr_dict['skip_header'])
 
-print(header)
+    alt_err = data[2]
+    star_ct = data[4]
+    solve_bool = data[1]
+    solve_time = data[9]
 
-# plot desired
-if args.error or args.all:
-    esave = "{0}_alterr.png".format(SAVE)
-    analyze_alt_error(alt_err, bins='auto', arcsec=True, save=esave)
-if args.perf or args.all:
-    psave = "{0}_perf.png".format(SAVE)
-    plot_ct(star_ct, solve_bool, normalize=True, line=True, save=psave)
-if args.time or args.all:
-    tsave = "{0}_time.png".format(SAVE)
-    analyze_solve_time(star_ct, solve_time, solve_bool, save=tsave)
+    print(hdr)
+
+    # plot desired
+    if args.error or plot_all:
+        esave = "{0}_alterr.png".format(SAVE)
+        analyze_alt_error(alt_err, bins='auto', arcsec=True, save=esave)
+    if args.perf or plot_all:
+        psave = "{0}_perf.png".format(SAVE)
+        plot_ct(star_ct, solve_bool, normalize=True, line=True, save=psave)
+    if args.time or plot_all:
+        tsave = "{0}_time.png".format(SAVE)
+        analyze_solve_time(star_ct, solve_time, solve_bool, save=tsave)
+
+else:
+
+    filenames = glob.glob("{0}/{1}*.txt".format(data_dir, args.DATA_NAME))
+    SAVE = "{0}/{1}".format(data_dir, args.SAVE_NAME)
+
+    p_alt_err = False if (args.error or args.perf) and not args.error else True
+    p_perf = False if (args.error or args.perf) and not args.perf else True
+    p_time = args.time
+    
+    analyze_param(args.param, filenames, SAVE, p_alt_err=p_alt_err, p_perf=p_perf, p_time=p_time)

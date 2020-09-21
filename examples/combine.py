@@ -5,6 +5,7 @@ one result file of a given name.
 """
 
 import os.path as op
+data_dir = op.join(op.dirname(op.dirname(op.abspath(__file__))), *("data", "sim"))
 import argparse
 
 # command line arguments
@@ -26,9 +27,6 @@ CN = args.COMBINE_NAME
 START = args.START
 END = args.N_TRIALS + START
 
-# get the correct directory
-data_dir = op.join(op.dirname(op.dirname(op.abspath(__file__))), *("data", "images"))
-
 # Initialize combined header information
 header = ''
 total_number = 0.
@@ -44,6 +42,8 @@ timeout_per_tot = 0.
 low_ct_tot = 0.
 low_ct_per = 0.
 tot_time = 1000000.
+snr = None
+skip = 0.
 
 # extract header data from each file
 for i in range(START, END):
@@ -67,6 +67,10 @@ for i in range(START, END):
                     _low_ct_tot = float(_temp[5][:-1])
                 elif "Time" in line:
                     _tot_time = float(_temp[5])
+                elif "SNR:" in line:
+                    snr = float(_temp[2])
+                elif "skip_header" in line:
+                    skip = int(float(_temp[3]))
 
             # update combined header information
             total_number += _total_number
@@ -80,13 +84,15 @@ for i in range(START, END):
         continue
 
 # more combined header information
-solved_per_solve = 100 * solved_tot / (total_number - low_ct_tot)
-solved_per_tot = 100 * solved_tot / total_number
-fail_per_solve = 100 * fail_tot / (total_number - low_ct_tot)
-fail_per_tot = 100 * fail_tot / total_number
-timeout_per_solve = 100 * timeout_tot / (total_number - low_ct_tot)
-timeout_per_tot = 100 * timeout_tot / total_number
-low_ct_per = 100 * low_ct_tot / total_number
+solver_tries = total_number - low_ct_tot
+solved_per_solve = 0 if solver_tries == 0 else 100 * solved_tot / solver_tries
+solved_per_tot = 0 if total_number == 0 else 100 * solved_tot / total_number
+fail_per_solve = 0 if solver_tries == 0 else 100 * fail_tot / solver_tries
+fail_per_tot = 0 if total_number == 0 else 100 * fail_tot / total_number
+timeout_per_solve = 0 if solver_tries == 0 else 100 * timeout_tot / solver_tries
+timeout_per_tot = 0 if total_number == 0 else 100 * timeout_tot / total_number
+low_ct_per = 0 if total_number == 0 else 100 * low_ct_tot / total_number
+snr_str = "# SNR: {0}\n".format(snr) if snr else ""
 
 OUT = '{0}/{1}.txt'.format(data_dir,CN)
 with open(OUT, 'w') as out:
@@ -103,8 +109,9 @@ with open(OUT, 'w') as out:
                 timeout_tot, timeout_per_solve, timeout_per_tot) +
             '# Low Star Counts (<{0}): {1}, {2}%\n'.format(
                 4, low_ct_tot, low_ct_per) +
-            '# Total Data Collection Time: {0} hrs\n'.format(tot_time) + 
-            '# skip_header = 23\n' +
+            '# Total Data Collection Time: {0} hrs\n'.format(tot_time) +
+            snr_str +
+            '# skip_header = {0}\n'.format(skip) +
             '#\n# Column Notes\n' + 
             '# num: Data Index\n' + 
             '# solved: 1 = Success, 0 = Fail, -1 = Undetermined (low star count or timed out)\n' + 

@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 plt.rcParams.update({'font.size': 20})
 import argparse
 import os.path as op
+data_dir = op.join(op.dirname(op.dirname(op.abspath(__file__))), *("data", "sim"))
 
 # plot histogram of indices
 def param_hist(index, filename=None):
@@ -94,8 +95,6 @@ parser.add_argument('SAVE_NAME', type=str,
                     help='str; the base name for the saved pngs')
 args = parser.parse_args()
 
-
-data_dir = op.join(op.dirname(op.dirname(op.abspath(__file__))), *("data", "images"))
 FILE = "{0}/{1}.txt".format(data_dir, args.DATA_FILE)
 data = np.genfromtxt(FILE, unpack=True)
 

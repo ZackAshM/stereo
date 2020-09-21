@@ -21,33 +21,36 @@ import stereo.flightpath as flightpath
 import tetra3
 
 import argparse
-import os.path as op
 import itertools
-
+import logging
+import os.path as op
+data_dir = op.join(op.dirname(op.dirname(op.abspath(__file__))), *("data", "sim"))
+import random
 from time import perf_counter as timestamp
 
-# from astropy.io import fits
 
 import numpy as np
-
-import random
-
-import logging
-
+from astropy.io import fits
 from astropy.coordinates import SkyCoord
-from astropy import units as u
 from astropy.time import Time
+from astropy import units as u
 from astropy.utils.iers.iers import conf
 conf.iers_auto_url = 'ftp://cddis.gsfc.nasa.gov/pub/products/iers/finals2000A.all'
 conf.auto_download = False
 
 
-def run_sim(N: int,
-            run_name: str,
-            output: str = None,
-            star_min: int = 4,
-            verbose_factor: int = 100,
-            single_run: bool = False) -> None:
+def run_sim(
+        N: int,
+        run_name: str,
+        output: str = None,
+        star_min: int = 4,
+        snr: float = None,
+        verbose_factor: int = 100,
+        single_run: bool = False,
+        save_image: bool = False,
+        plot: bool = False,
+        exit_fail: int = 100,
+) -> None:
     """
     Perform STEREO Monte Carlo.
 
@@ -61,11 +64,19 @@ def run_sim(N: int,
         The file name of the data log. If not given, no log is saved.
     star_min : int
         Skips the trial if the generated field has less than this many stars.
+    snr : float
+        If given, forces the image to the desired signal-to-noise ratio.
     verbose_factor : int
         Prints the progress every this many trials.
     single_run : bool
         If True, ignores N and runs for exactly one trial, successful or not.
         Prints the results immediately.
+    save_image : bool
+        If True, save the image (as a compressed fits image).
+    plot : bool
+        If True, immediately plots the image.
+    exit_fail : int
+        How many images in a row to fail to solve or timeout before giving up.
     """
 
     # sim intialization
@@ -74,6 +85,7 @@ def run_sim(N: int,
     star_num_fail = 0
     solver_fail = 0
     timeout_fail = 0
+    exit_fail_ct = 0
     data_generator = ()
     
     # image and solver params
@@ -110,6 +122,8 @@ def run_sim(N: int,
     t3.load_database(db)
     t3.database_properties['pattern_max_error'] = 0.005
 
+    img_dir = op.join(op.dirname(data_dir), "images")
+
     if not single_run:
         print("{0}: Beginning Data Collection...".format(run_name))
     
@@ -129,6 +143,11 @@ def run_sim(N: int,
                 print("\r{0}: Solving Trial ".format(run_name), trial_num, "... \n(", data_pts,
                       " Solved Successfully, ", star_num_fail, " Star Count Fails, ", solver_fail,
                       " Failed to Solve, ", timeout_fail, " Timed Out)", sep="")
+
+            # handle repeated failures
+            if exit_fail_ct >= exit_fail:
+                print("{0}: Failed {1} times in a row. Stopping sim...".format(run_name, exit_fail))
+                raise KeyboardInterrupt
 
             # get a random center coord from ANITA flight
             ind = random.randrange(0, 37279)
@@ -171,15 +190,22 @@ def run_sim(N: int,
                 
                 continue
 
-            # uncomment to save images with high star counts
-            # if star_ct >= 10:
-            #     img = fits.CompImageHDU(image.image)
-            #     filename = 'data/images/{0}_{1:04}.fits'.format(run_name, trial_num)
-            #     img.writeto(filename, overwrite=True)
+            # save image
+            if save_image:
+                img = fits.CompImageHDU(image.image)
+                filename = '{0}/{1}_{2:04}.fits'.format(img_dir, run_name, trial_num)
+                img.writeto(filename, overwrite=True)
 
+            # make the image
+            image.snr = snr if snr else image.snr
+            make_image = image.image
+
+            # plot image
+            if plot:
+                image.plot()
+                
             # run star tracker algorithm
             try:
-                test_image = image.image
                 t3result = run_tetra3(image, database=db, t3=t3, return_result=True,
                                       **solve_dict, **centroid_dict)
                 solve_tf = t3result['T_solve']
@@ -189,6 +215,7 @@ def run_sim(N: int,
                     result = SkyCoord(ra=t3result["RA"], dec=t3result["Dec"], unit=u.deg)
             except StopIteration:
                 timeout_fail += 1
+                exit_fail_ct += 1
                 
                 # add data line
                 trials = trial_num
@@ -215,12 +242,13 @@ def run_sim(N: int,
             except KeyboardInterrupt:
                 raise
             except:
-                print("Unknown error occurred at")
+                print("Mystery error occurred at")
                 print('Index: {0}, Center: {1}'.format(ind, center_radec))
                 continue
             
             if not result: # no solution
                 solver_fail += 1
+                exit_fail_ct += 1
                 
                 # add data line
                 trials = trial_num
@@ -247,13 +275,8 @@ def run_sim(N: int,
 
             else: # success
                 data_pts += 1
+                exit_fail_ct = 0 #reset
                 
-                # uncomment to save low count but solved images
-                # if star_ct < 10:
-                #     img = fits.CompImageHDU(image.image)
-                #     filename = 'data/images/{0}_{1:04}.fits'.format(run_name, trial_num)
-                #     img.writeto(filename, overwrite=True)
-
                 # get alt error
                 result_altaz = result.transform_to(altaz)
                 result_alt = result_altaz.alt.value
@@ -289,9 +312,8 @@ def run_sim(N: int,
 
         if output:
             
-            data_dir = op.join(op.dirname(op.dirname(op.abspath(__file__))), *("data", "images"))
-            filename = "{0}/{1}.txt".format(data_dir,output)
-            out = open(filename, 'w')
+            outname = "{0}/{1}.txt".format(data_dir,output)
+            out = open(outname, 'w')
             
             print("{0}: Done. Saving data to {1}...".format(run_name, output))
 
@@ -303,6 +325,8 @@ def run_sim(N: int,
             timeout_fail_per_solver = 100 * timeout_fail / (trial_num - star_num_fail)
             timeout_fail_per_total = 100 * timeout_fail / trial_num
             star_num_fail_per_total = 100 * star_num_fail / trial_num
+            snr_str = '# SNR: {0}\n'.format(snr) if snr is not None else ''
+            skip_str = '# skip_header = 24\n' if snr is not None else '# skip_header = 23\n'
 
             out.write(
                 '# STEREO Data for run titled "{0}"\n'.format(run_name) + 
@@ -316,7 +340,7 @@ def run_sim(N: int,
                 '# Low Star Counts (<{0}): {1}, {2}%\n'.format(
                     star_min, star_num_fail, star_num_fail_per_total) +
                 '# Total Data Collection Time: {0} hrs\n'.format(total_t) + 
-                '# skip_header = 23\n' + 
+                snr_str + skip_str + 
                 '#\n# Column Notes\n' + 
                 '# num: Data Index\n' + 
                 '# solved: 1 = Success, 0 = Fail, -1 = Undetermined (low star count or timed out)\n' + 
@@ -348,14 +372,14 @@ def run_sim(N: int,
 
         if output:
 
-            data_dir = op.join(op.dirname(op.dirname(op.abspath(__file__))), *("data", "images"))
-            filename = "{0}/{1}.txt".format(data_dir,output)
-            out = open(filename, 'w')
+            outname = "{0}/{1}.txt".format(data_dir,output)
+            out = open(outname, 'w')
 
             total_t = (timestamp() - total_t0) / 60 / 60
 
             print("{0}: Data collection interrupted. Saving data to {1}...".format(run_name, output))
 
+            # header data
             data_pts_per_solver = 100 * data_pts / (trial_num - star_num_fail)
             data_pts_per_total = 100 * data_pts / trial_num
             solver_fail_per_solver = 100 * solver_fail / (trial_num - star_num_fail)
@@ -363,6 +387,8 @@ def run_sim(N: int,
             timeout_fail_per_solver = 100 * timeout_fail / (trial_num - star_num_fail)
             timeout_fail_per_total = 100 * timeout_fail / trial_num
             star_num_fail_per_total = 100 * star_num_fail / trial_num
+            snr_str = '# SNR: {0}\n'.format(snr) if snr is not None else ''
+            skip_str = '# skip_header = 24\n' if snr is not None else '# skip_header = 23\n'
 
             out.write(
                 '# STEREO Data for run titled "{0}"\n'.format(run_name) + 
@@ -376,7 +402,7 @@ def run_sim(N: int,
                 '# Low Star Counts (<{0}): {1}, {2}%\n'.format(
                     star_min, star_num_fail, star_num_fail_per_total) +
                 '# Total Data Collection Time: {0} hrs\n'.format(total_t) + 
-                '# skip_header = 23\n' +
+                snr_str + skip_str + 
                 '#\n# Column Notes\n' + 
                 '# num: Data Index\n' + 
                 '# solved: 1 = Success, 0 = Fail, -1 = Undetermined (low star count or timed out)\n' + 
@@ -390,7 +416,7 @@ def run_sim(N: int,
                 '# solve_time: Total time taken to solve (or fail) in seconds\n' +
                 '#\n# num     solved     alt_error     A4_index     star_ct     real_ra     real_dec     ra     dec     solve_time\n'
             )
-
+            
             for data in data_generator:
                 out.write(
                     '{0}     {1}     {2}     {3}     {4}     {5}     {6}     {7}     {8}     {9}\n'.format(*data)
@@ -410,16 +436,37 @@ parser.add_argument('RUN_NAME', type=str,
                     help='str; output filename of results')
 parser.add_argument('-t', '--TOTAL_SOLVE_TRIALS', type=float, default=100,
                     help='int; number of solved trials to accomplish; default=100')
+parser.add_argument('--SNR', type=float, default=None,
+                    help='float; the desired signal-to-noise ratio; default=None')
 parser.add_argument('-v', '--VERBOSE_FACTOR', type=int, default=100,
                     help='int; print progress per this factor; default=100')
-parser.add_argument('-s', '--SINGLE_RUN', type=bool, default=False,
-                    help='bool; if True, performs for only a single image; default=False')
+parser.add_argument('-s', '--SINGLE_RUN', action='store_true',
+                    help='perform for only a single image')
+parser.add_argument('-i', '--SAVE_IMAGE', action='store_true',
+                    help='save the image (as a compressed fits image)')
+parser.add_argument('-p', '--PLOT', action='store_true',
+                    help='immediately plot the image')
+
 args = parser.parse_args()
 
 TST = args.TOTAL_SOLVE_TRIALS
 RN = args.RUN_NAME
+SNR = args.SNR
 VF = args.VERBOSE_FACTOR
 SR = args.SINGLE_RUN
+SI = args.SAVE_IMAGE
+P = args.PLOT
 output = None if SR else RN
 
-run_sim(TST, RN, star_min=4, verbose_factor=VF, single_run=SR, output=output)
+run_sim(
+    TST,
+    RN,
+    star_min=4,
+    snr=SNR,
+    verbose_factor=VF,
+    single_run=SR,
+    save_image=SI,
+    plot=P,
+    exit_fail=100,
+    output=output
+)

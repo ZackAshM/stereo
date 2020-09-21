@@ -7,7 +7,7 @@
 FILENAME=$(basename $0)
 ABS_PATH=$(realpath $0)
 PROGRAM_DIR=$(dirname $ABS_PATH)
-DATA_PATH="$(dirname $PROGRAM_DIR)/data/images"
+DATA_PATH="$(dirname $PROGRAM_DIR)/data/sim"
 
 display_help() {
     arg_sty() {
@@ -34,6 +34,8 @@ display_help() {
     echo "   $(arg_sty -t total)        The total number of solve trials to achieve."
     echo "                   Default=10000."
     echo
+    echo "   $(arg_sty --snr snr)       Force the images to have this signal-to-noise ratio."
+    echo
     echo "   $(arg_sty --jobs jobs)"
     echo "   $(arg_sty -j jobs)         How many jobs to split the sim into. Default=10."
     echo
@@ -54,7 +56,7 @@ fi
 
 # define CL args
 OPTIONS=ht:j:
-LONGOPTS=help,test_args,total:,j:
+LONGOPTS=help,test_args,total:,snr:,j:
 
 # -regarding ! and PIPESTATUS see above
 # -temporarily store output to be able to check for errors
@@ -70,7 +72,7 @@ fi
 eval set -- "$PARSED"
 
 # set defaults
-TOTAL=10000 JOBS=10 TEST_ARGS=false
+TOTAL=10000 SNR=-999 JOBS=10 TEST_ARGS=false
 # now enjoy the options in order and nicely split until we see --
 while true; do
     case "$1" in
@@ -84,6 +86,10 @@ while true; do
 	    ;;
 	-t|--total)
 	    TOTAL=$2
+	    shift 2
+	    ;;
+	--snr)
+	    SNR=$2
 	    shift 2
 	    ;;
 	-j|--jobs)
@@ -110,8 +116,20 @@ fi
 # set required arguments
 RUN_NAME=$1
 
+# SNR stuff
+if (( $(echo "$SNR == -999" |bc -l) )); then
+    SNR_STR=""
+    SNR_STR_TEST=""
+elif (( $(echo "$SNR < 0.1" |bc -l) )); then
+    echo "Error: SNR >= 0.1 required"
+    exit 4
+else
+    SNR_STR="--SNR $SNR"
+    SNR_STR_TEST=" snr: $SNR,"
+fi
+
 if [ "$TEST_ARGS" = true ]; then
-    echo "name: $RUN_NAME, total: $TOTAL, jobs: $JOBS"
+    echo "name: $RUN_NAME, total: $TOTAL,$SNR_STR_TEST jobs: $JOBS"
     exit 0
 fi
 
@@ -134,14 +152,18 @@ FILENAMES=${FILENAMES:-1}
 # define how to finish the program
 finish() {
     # combine the files into one
-    echo "$FILENAME: Jobs finished. Combining data to $DATA_PATH/$RUN_NAME..."
+    echo "$FILENAME: Jobs finished. Combining data to $DATA_PATH/$RUN_NAME.txt..."
     COMBINE="${PROGRAM_DIR}/combine.py"
     python3 $COMBINE _$RUN_NAME $RUN_NAME -s 1 -N $JOBS
 
     # delete the individual files
     FILENAMES=$(echo $FILENAMES | tr " " ,)
-    eval "rm -rf $DATA_PATH/{$FILENAMES}.txt"
-
+    if [ "$JOBS" -eq 1 ]; then
+	eval "rm -rf $DATA_PATH/$FILENAMES.txt"
+    else
+	eval "rm -rf $DATA_PATH/{$FILENAMES}.txt"
+    fi
+    
     echo "$FILENAME: Finished."
 
     exit 0
@@ -152,7 +174,9 @@ trap finish SIGINT
 
 # run the sim using all cores
 RUN_SIM="${PROGRAM_DIR}/run_sim.py"
-parallel --termseq INT,5000 -u -j 100% python3 $RUN_SIM -t $TRIALS -v $VERBOSE_FACTOR ::: $FILENAMES
+parallel --termseq INT,5000 -u -j 100% python3 $RUN_SIM -t $TRIALS -v $VERBOSE_FACTOR $(echo $SNR_STR) ::: $FILENAMES
+
+finish
 
 exit 0
 

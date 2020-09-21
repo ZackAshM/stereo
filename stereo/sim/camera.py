@@ -46,6 +46,8 @@ class Camera(object):
         The first order radius of the lens aperture.
     fov : Tuple[float, float, float]
         The horizontal, vertical, and diagonal fields of view.
+    pixscale : float
+        The ccd pixel scale in arcsec/pixel.
 
     Methods
     -------
@@ -115,6 +117,17 @@ class Camera(object):
             # and return them
             self._fov = (xfov, yfov, dfov)
             return (xfov, yfov, dfov)
+
+    @property
+    def pixscale(self) -> float:
+        try:
+            return self._pixscale # type: ignore
+        except AttributeError:
+            fov = self.fov[0] * 60 * 60 # in arcsec
+            pix = self.sensor_pixwidth
+            pixscale = fov / pix
+            self._pixscale = pixscale
+            return pixscale
 
     def loadQE(self, path: str, QE_peak: float = 1.0, **kwargs: Any) -> None:
         """

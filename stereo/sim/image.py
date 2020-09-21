@@ -2,7 +2,7 @@
 This module provides the Image class.
 """
 
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Any
 
 import attr
 import numpy as np
@@ -42,11 +42,18 @@ class Image(object):
         The dimmest magnitude cutoff. Default = max magnitude in stars['Mag'].
     psf_sigma : float
         The standard deviation of the Gaussian PSF in pixels. Default = 3.
+    snr : float
+        If specified, forces the image to have this signal-to-noise ratio 
+        defined by mean(star count) / sqrt(mean(noise count)).
+    rotation : float
+        The camera rotation in arcsec/sec.
 
     Properties
     ----------
     size : Tuple[int, int]
         The size of the image frame in pixels.
+    trail_length : int
+        The length of star trail in pixels due to rotation.
     altaz_stars : astropy.table.Table
         The table of stars in 'alt', 'az', 'Mag'.
     proj_stars : astropy.table.Table
@@ -85,6 +92,8 @@ class Image(object):
     cam: Camera = attr.ib(default=None)
     mag_limit: float = attr.ib()
     psf_sigma: float = attr.ib(default=3)
+    snr: float = attr.ib(default=None)
+    rotation: float = attr.ib(default=0)
 
     @mag_limit.default
     def mag_limit_default(self) -> float:
@@ -102,6 +111,19 @@ class Image(object):
             size = (self.cam.sensor_pixheight, self.cam.sensor_pixwidth)
             self._size = size
             return size
+
+    @property
+    def trail_length(self) -> int:
+        """Returns the trail length of stars in the image in pixels."""
+        try:
+            return self._trail_length # type: ignore
+        except AttributeError:
+            if self.cam is None:
+                raise ValueError("Camera object required to determine trail length")
+            trail_length = int(self.rotation * self.cam.exp_time / self.cam.pixscale)
+            trail_length += 1
+            self._trail_length = trail_length
+            return trail_length            
 
     @property
     def altaz_stars(self) -> Table:
@@ -275,29 +297,46 @@ class Image(object):
             y_lo, y_hi = self.image_bounds["y"]
 
             # map to pixels
-            xind = np.interp(x, (x_lo, x_hi), (0.5, width + 0.5)).astype(int)
-            yind = np.interp(y, (y_lo, y_hi), (0.5, height + 0.5)).astype(int)
+            xind = np.interp(x, (x_lo, x_hi), (0.5, width)).astype(int)
+            yind = np.interp(y, (y_lo, y_hi), (0.5, height)).astype(int)
 
             # set pixel values at star pixel positions
             for i in zip(yind, xind, ct):
-                image_data[i[0], i[1]] = i[2]
+                for shift in range(self.trail_length):
+                    try:
+                        image_data[i[0], i[1] + shift] = i[2] / self.trail_length
+                    except IndexError:
+                        continue
 
             # apply Gaussian PSF
             image_data = gaussian_filter(image_data, sigma=self.psf_sigma)
+
+            # generate a background
+            read_noise = np.random.poisson(self.cam.avg_noise, size=self.size)
+            dark_current_level = np.interp(self.cam.temp, *self.cam.dark_current)
+            dark_current = np.random.lognormal(
+                dark_current_level * self.cam.exp_time, size=self.size
+            )
+            background = read_noise + dark_current
+            
+            # force signal-to-noise ratio if desired
+            if self.snr is not None:
+                signal = np.mean(image_data[image_data > 0])
+                noise = np.mean(background[background > 0])**0.5
+                image_data *= self.snr / (signal / noise)
+
+            # add background
+            image_data += background
+
+            # rescale for nice plot behavior
             if np.max(image_data):
                 ct_scale = self.cam.max_ct / np.max(image_data)
                 image_data *= ct_scale
 
-            # add noise and dark current
-            image_data += np.random.poisson(self.cam.avg_noise, size=self.size)
-            noise_level = np.interp(self.cam.temp, *self.cam.dark_current)
-            image_data += np.random.lognormal(
-                noise_level * self.cam.exp_time, size=self.size
-            )
-
+            # abide by well depth if necessary
             image_data = np.clip(image_data, 0, self.cam.max_ct)
 
-            # flip horizontally and vertically
+            # correct reflections
             image_data = image_data[::-1, ::-1]
 
             # and return the image
@@ -396,11 +435,12 @@ class Image(object):
 
     def plot(
         self,
-        vmin: float = 1,
+        vmin: float = None,
         vmax: float = None,
         centroids: np.ndarray = None,
         centroid_radius: float = 20,
         filename: str = None,
+        **subplots_kws: Any,
     ) -> None:
         """
         Plot the image.
@@ -408,7 +448,8 @@ class Image(object):
         Parameters
         ----------
         vmin, vmax : float
-            The min and max passed into the pyplot LogNorm scale.
+            The min and max passed into the pyplot LogNorm scale. 
+            Default = image min/max.
         centroids : ndarray
             The centroids of the image. If not None, returns the image with position
             annotations.
@@ -417,18 +458,30 @@ class Image(object):
         filename : str
             If given, saves the image with this filename.
             Extension is assumed .png.
+        **subplots_kws
+            Keyword arguments passed to plt.subplots
         """
 
-        fig, ax = plt.subplots(figsize=[20, 10])
+        if 'figsize' not in subplots_kws:
+            subplots_kws['figsize'] = [20,10]
+        fig, ax = plt.subplots(**subplots_kws)
         plt.gray()
-        plt.title(
-            r"ra{0:.2f}$\degree$dec{1:.2f}$\degree$, FoV: {2:.1f}$\degree$".format(
-                self.center.ra.value, self.center.dec.value, self.cam.fov[2]
-            )
-        )
-        vmax = self.cam.max_ct if vmax is None else vmax
-        ax.imshow(self.image, norm=LogNorm(vmin=vmin, vmax=vmax))
 
+        if self.snr:
+            title = r'ra{0:.2f}$\degree$dec{1:.2f}$\degree$, FoV: {2:.1f}$\degree$, SNR: {3:.1f}, $\omega$: {4:0}"/s'.format(
+                self.center.ra.value, self.center.dec.value, self.cam.fov[2], self.snr, self.rotation
+            )
+        else:
+            title = r'ra{0:.2f}$\degree$dec{1:.2f}$\degree$, FoV: {2:.1f}$\degree$, $\omega$: {3:0}"/s'.format(
+                self.center.ra.value, self.center.dec.value, self.cam.fov[2], self.rotation
+            )
+        plt.title(title)
+        vmin = np.min(self.image) if vmin is None else vmin
+        vmax = np.max(self.image) if vmax is None else vmax
+        ax.imshow(self.image, norm=LogNorm(vmin=vmin, vmax=vmax))
+        ax.set_axis_off()
+
+        # plot centroid annotations if desired
         if centroids is not None:
             x = centroids[:, 1]
             y = centroids[:, 0]
@@ -436,7 +489,8 @@ class Image(object):
                 circ = Circle((xx, yy), centroid_radius, ec="red", fill=False)
                 ax.add_patch(circ)
 
+        # save if desired
         if filename:
-            plt.savefig(filename + ".png")
+            plt.savefig(filename + ".png", bbox_inches='tight', pad_inches=0)
 
         plt.show()
