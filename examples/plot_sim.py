@@ -43,8 +43,8 @@ def get_header(filename):
                 header_dict['tot_time'] = float(_temp[5])
             elif "skip_header" in line:
                 header_dict['skip_header'] = int(float(_temp[3]))
-            elif "SNR:" in line:
-                header_dict['snr'] = float(_temp[2])
+            elif "     " in line:
+                header_dict['columns'] = _temp[1:]
     return header, header_dict
 
 def analyze_alt_error(alt_err, bins='auto', arcsec=True, save=None):
@@ -223,6 +223,10 @@ def analyze_solve_time(star_ct_col, solve_time_col, solve_bool_col, save=None):
 def analyze_param(param: str, filenames, savename, p_alt_err: bool = True, p_perf: bool = True, p_time: bool = True):
     """Plot Alt_err vs param, Perf vs star ct vs param, and solve time vs star ct vs param"""
 
+    if param=='rotation':
+        param_unit = ' ["/s]'
+    else:
+        param_unit = "" 
     data_dict = {}
     rates = {}
     par_vals = []
@@ -231,10 +235,6 @@ def analyze_param(param: str, filenames, savename, p_alt_err: bool = True, p_per
          solve_rate = hdr_dict['solved_per_solve']
          fail_rate = hdr_dict['fail_per_solve']
          timeout_rate = hdr_dict['timeout_per_solve']
-         par_val = hdr_dict[param]
-
-         rates[str(hdr_dict[param])] = np.array([solve_rate, fail_rate, timeout_rate])
-         par_vals.append(par_val)
          
          data = np.genfromtxt(FILE, unpack=True, skip_header=hdr_dict['skip_header'])
          alt_err = data[2]
@@ -242,7 +242,14 @@ def analyze_param(param: str, filenames, savename, p_alt_err: bool = True, p_per
          solve_bool = data[1]
          solve_time = data[9]
 
+         param_ind = hdr_dict['columns'].index(param)
+         par_val = data[param_ind]
+         par_val = par_val[par_val!=-999][0]
+
          data_dict[str(par_val)] = np.array([alt_err, star_ct, solve_bool, solve_time])
+         rates[str(par_val)] = np.array([solve_rate, fail_rate, timeout_rate])
+         par_vals.append(par_val)
+
     par_vals = np.array(par_vals)
 
     def param_alt_err(data_dict, par_vals, save):
@@ -260,15 +267,21 @@ def analyze_param(param: str, filenames, savename, p_alt_err: bool = True, p_per
         # plot
         fig, ax = plt.subplots(figsize=[15, 10])
 
-        ax.set(xlabel=param, ylabel='Altitude Error ["]', 
+        ax.set(xlabel=param+param_unit, ylabel='Altitude Error ["]', 
                title='Altitude Error vs {0}'.format(param))
-        plt.xscale('log')
+        if param=='snr':
+            plt.xscale('log')
+
+        if param=='rotation':
+            mean_rot = 152
+            plt.axvline(x=mean_rot, c='red', alpha=0.8, label='ANITA Mean Rotation')
+            plt.legend(loc='upper right')
 
         plt.errorbar(par_vals, altdata[0], yerr=altdata[1], fmt='o', capsize=5, c='black', alpha=0.8)
         plt.grid(True)
 
         if save:
-            plt.savefig(save, bbox_inches='tight', pad_inches=0)
+            plt.savefig(save, bbox_inches='tight', pad_inches=0.1)
 
         #plot
         # plt.show()
@@ -285,9 +298,10 @@ def analyze_param(param: str, filenames, savename, p_alt_err: bool = True, p_per
         # plot rates
         fig, ax = plt.subplots(figsize=[15, 10])
 
-        ax.set(xlabel=param, ylabel='Percentage Solved/Failed/Timeout', 
+        ax.set(xlabel=param+param_unit, ylabel='Percentage Solved/Failed/Timeout', 
                title='Solve Rates vs {0}'.format(param))
-        plt.xscale('log')
+        if param=='snr':
+            plt.xscale('log')
 
         x = plotdata[0]
         plt.plot(x, plotdata[1], label='Solved', color='green', marker='o', alpha=0.8)
@@ -299,7 +313,7 @@ def analyze_param(param: str, filenames, savename, p_alt_err: bool = True, p_per
 
         if savename:
             save = "{0}_perfrate.png".format(savename)
-            plt.savefig(save, bbox_inches='tight', pad_inches=0)
+            plt.savefig(save, bbox_inches='tight', pad_inches=0.1)
 
         #plot
         # plt.show()
@@ -321,11 +335,11 @@ def analyze_param(param: str, filenames, savename, p_alt_err: bool = True, p_per
             xdata, ydata, _, _ = plot_ct(star_ct_col, solve_bool_col, normalize=True, plot=False)
             plt.plot(xdata, ydata, label=ind, marker='o', color=colors[par], alpha=0.8)
         handles, labels = ax2.get_legend_handles_labels()
-        plt.legend(handles[::-1], labels[::-1], title=param, loc='lower right')
+        plt.legend(handles[::-1], labels[::-1], title=param+param_unit, loc='lower right')
         
         if savename:
             save = "{0}_perf.png".format(savename)
-            plt.savefig(save, bbox_inches='tight', pad_inches=0)
+            plt.savefig(save, bbox_inches='tight', pad_inches=0.1)
 
     def param_time(data_dict, par_vals, savename):
 
@@ -360,10 +374,10 @@ def analyze_param(param: str, filenames, savename, p_alt_err: bool = True, p_per
             plt.errorbar(*data, yerr=solve_time_err, fmt='o', capsize=5, label=ind, c=colors[par])
 
         handles, labels = ax.get_legend_handles_labels()
-        plt.legend(handles[::-1], labels[::-1], title=param, loc='upper right')
+        plt.legend(handles[::-1], labels[::-1], title=param+param_unit, loc='upper right')
             
         if savename:
-            plt.savefig(savename, bbox_inches='tight', pad_inches=0)
+            plt.savefig(savename, bbox_inches='tight', pad_inches=0.1)
 
             
     if p_alt_err:
@@ -379,9 +393,9 @@ def analyze_param(param: str, filenames, savename, p_alt_err: bool = True, p_per
     
 # command line arguments
 parser = argparse.ArgumentParser(
-    description='Plots the run_sim.py data. Use the options to decide which plots to save or none to plot all. Options include the histogram of the altitude error, the plot of the solve/fail/timeout performance of tetra3 across star counts, and the solve time across star counts. Use --param to perform the analysis across multiple data with a varying specific parameter whose filenames contain a common string (ie. SNR10.txt, SNR1.txt, SNR0.1.txt,...). Note that the data is assumed to be in the data/sim/ directory.')
+    description='Plots the run_sim.py data. Use the options to decide which plots to save or none to plot all. Options include the histogram of the altitude error, the plot of the solve/fail/timeout performance of tetra3 across star counts, and the solve time across star counts. Use --param to perform the analysis across multiple data with a varying specific parameter whose filenames contain a common string (ie. SNR10.txt, SNR1.txt, SNR0.1.txt,... -> pass SNR* as DATA_NAME). Note that the data is assumed to be in the data/sim/ directory.')
 parser.add_argument('DATA_NAME', type=str,
-                    help='str; the name of the data file, .txt extension assumed. If --snr active, this is the name of the common basename of snr data files.')
+                    help='str; the name of the data file, .txt extension assumed. If --param, this is the file name pattern e.g. SNR*, ROT*ANG*, etc.')
 parser.add_argument('SAVE_NAME', type=str,
                     help='str; the common name of the saved pngs')
 parser.add_argument('-e', '--error', action='store_true',
@@ -425,11 +439,12 @@ if args.param == 'none':
 
 else:
 
-    filenames = glob.glob("{0}/{1}*.txt".format(data_dir, args.DATA_NAME))
-    SAVE = "{0}/{1}".format(data_dir, args.SAVE_NAME)
+    filenames = glob.glob("{0}/{1}".format(data_dir, args.DATA_NAME))
+    print(filenames)
+    SAVE = "{0}/{1}.txt".format(data_dir, args.SAVE_NAME)
 
-    p_alt_err = False if (args.error or args.perf) and not args.error else True
-    p_perf = False if (args.error or args.perf) and not args.perf else True
-    p_time = args.time
+    # p_alt_err = False if (args.error or args.perf) and not args.error else True
+    # p_perf = False if (args.error or args.perf) and not args.perf else True
+    # p_time = args.time
     
-    analyze_param(args.param, filenames, SAVE, p_alt_err=p_alt_err, p_perf=p_perf, p_time=p_time)
+    # analyze_param(args.param, filenames, SAVE, p_alt_err=p_alt_err, p_perf=p_perf, p_time=p_time)

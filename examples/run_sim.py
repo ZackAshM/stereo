@@ -204,7 +204,7 @@ def run_sim(
                 img.writeto(filename, overwrite=True)
 
             # make the image
-            image.rotation = rotation if rotation else np.random.normal(loc=152.504, scale=949.721)
+            image.rotation = rotation if rotation is not None else np.random.normal(loc=152.504, scale=949.721)
             image.snr = snr
             make_image = image.image
 
@@ -342,7 +342,7 @@ def run_sim(
             timeout_fail_per_solver = 100 * timeout_fail / (trial_num - star_num_fail)
             timeout_fail_per_total = 100 * timeout_fail / trial_num
             star_num_fail_per_total = 100 * star_num_fail / trial_num
-            skip_str = '# skip_header = 23\n'
+            skip_str = '# skip_header = 25\n'
 
             out.write(
                 '# STEREO Data for run titled "{0}"\n'.format(run_name) + 
@@ -405,7 +405,7 @@ def run_sim(
             timeout_fail_per_solver = 100 * timeout_fail / (trial_num - star_num_fail)
             timeout_fail_per_total = 100 * timeout_fail / trial_num
             star_num_fail_per_total = 100 * star_num_fail / trial_num
-            skip_str = '# skip_header = 23\n'
+            skip_str = '# skip_header = 25\n'
 
             out.write(
                 '# STEREO Data for run titled "{0}"\n'.format(run_name) + 

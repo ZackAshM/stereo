@@ -42,8 +42,6 @@ timeout_per_tot = 0.
 low_ct_tot = 0.
 low_ct_per = 0.
 tot_time = 1000000.
-snr = None
-skip = 0.
 
 # extract header data from each file
 for i in range(START, END):
@@ -67,10 +65,6 @@ for i in range(START, END):
                     _low_ct_tot = float(_temp[5][:-1])
                 elif "Time" in line:
                     _tot_time = float(_temp[5])
-                elif "SNR:" in line:
-                    snr = float(_temp[2])
-                elif "skip_header" in line:
-                    skip = int(float(_temp[3]))
 
             # update combined header information
             total_number += _total_number
@@ -92,7 +86,6 @@ fail_per_tot = 0 if total_number == 0 else 100 * fail_tot / total_number
 timeout_per_solve = 0 if solver_tries == 0 else 100 * timeout_tot / solver_tries
 timeout_per_tot = 0 if total_number == 0 else 100 * timeout_tot / total_number
 low_ct_per = 0 if total_number == 0 else 100 * low_ct_tot / total_number
-snr_str = "# SNR: {0}\n".format(snr) if snr else ""
 
 OUT = '{0}/{1}.txt'.format(data_dir,CN)
 with open(OUT, 'w') as out:
@@ -110,8 +103,7 @@ with open(OUT, 'w') as out:
             '# Low Star Counts (<{0}): {1}, {2}%\n'.format(
                 4, low_ct_tot, low_ct_per) +
             '# Total Data Collection Time: {0} hrs\n'.format(tot_time) +
-            snr_str +
-            '# skip_header = {0}\n'.format(skip) +
+            '# skip_header = 23\n' +
             '#\n# Column Notes\n' + 
             '# num: Data Index\n' + 
             '# solved: 1 = Success, 0 = Fail, -1 = Undetermined (low star count or timed out)\n' + 
@@ -123,7 +115,9 @@ with open(OUT, 'w') as out:
             '# ra: Result RA of the center of the field in degrees\n' + 
             '# dec: Result DEC of the center of the field in degrees\n' +
             '# solve_time: Total time taken to solve (or fail) in seconds\n' +
-            '#\n# num     solved     alt_error     A4_index     star_ct     real_ra     real_dec     ra     dec     solve_time\n'
+            '# snr: mean(signal) / sqrt(mean(background))\n' +
+            '# rotation: payload/camera rotation in arcsec/s\n' +
+            '#\n# num     solved     alt_error     A4_index     star_ct     real_ra     real_dec     ra     dec     solve_time     snr     rotation\n'
         )
 
     # write the data from each file

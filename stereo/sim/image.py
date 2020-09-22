@@ -47,6 +47,9 @@ class Image(object):
         defined by mean(star count) / sqrt(mean(noise count)).
     rotation : float
         The camera rotation in arcsec/sec.
+    roll : float
+        The payload roll in radians. If not given, it's the mean roll from
+        ANITAIV flight data.
 
     Properties
     ----------
@@ -94,6 +97,7 @@ class Image(object):
     psf_sigma: float = attr.ib(default=3)
     snr: float = attr.ib(default=None)
     rotation: float = attr.ib(default=0)
+    roll: float = attr.ib(default=0.20560889)
 
     @mag_limit.default
     def mag_limit_default(self) -> float:
@@ -306,7 +310,9 @@ class Image(object):
             for i in zip(yind, xind, ct):
                 for shift in range(self.trail_length):
                     try:
-                        image_data[i[0], i[1] + shift] = i[2] / self.trail_length
+                        yshift = int(i[0] + shift * np.sin(self.roll))
+                        xshift = int(i[1] + shift * np.cos(self.roll))
+                        image_data[yshift, xshift] = i[2] / self.trail_length
                     except IndexError:
                         continue
 
