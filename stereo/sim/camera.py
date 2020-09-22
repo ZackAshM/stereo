@@ -121,9 +121,9 @@ class Camera(object):
     @property
     def pixscale(self) -> float:
         try:
-            return self._pixscale # type: ignore
+            return self._pixscale  # type: ignore
         except AttributeError:
-            fov = self.fov[0] * 60 * 60 # in arcsec
+            fov = self.fov[0] * 60 * 60  # in arcsec
             pix = self.sensor_pixwidth
             pixscale = fov / pix
             self._pixscale = pixscale

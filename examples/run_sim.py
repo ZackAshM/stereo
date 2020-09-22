@@ -45,6 +45,7 @@ def run_sim(
         output: str = None,
         star_min: int = 4,
         snr: float = None,
+        rotation: float = None,
         verbose_factor: int = 100,
         single_run: bool = False,
         save_image: bool = False,
@@ -66,6 +67,9 @@ def run_sim(
         Skips the trial if the generated field has less than this many stars.
     snr : float
         If given, forces the image to the desired signal-to-noise ratio.
+    rotation : float
+        The rotation in arcsec/s. If None, rotation is selected randomly from
+        a Gaussian range in ANITA flightpath data.
     verbose_factor : int
         Prints the progress every this many trials.
     single_run : bool
@@ -181,10 +185,13 @@ def run_sim(
                 result_ra = -999
                 result_dec = -999
                 solve_t = -999
+                data_snr = -999
+                data_rot = -999
             
                 data_line = [[
                     trials, solved, alt_err, ind_val, num_stars, 
-                    real_ra, real_dec, result_ra, result_dec, solve_t
+                    real_ra, real_dec, result_ra, result_dec, solve_t,
+                    data_snr, data_rot
                 ]]
                 data_generator = itertools.chain(data_generator, data_line)
                 
@@ -197,7 +204,8 @@ def run_sim(
                 img.writeto(filename, overwrite=True)
 
             # make the image
-            image.snr = snr if snr else image.snr
+            image.rotation = rotation if rotation else np.random.normal(loc=152.504, scale=949.721)
+            image.snr = snr
             make_image = image.image
 
             # plot image
@@ -228,10 +236,13 @@ def run_sim(
                 result_ra = -999
                 result_dec = -999
                 solve_t = -999
+                data_snr = image.snr
+                data_rot = image.rotation
             
                 data_line = [[
                     trials, solved, alt_err, ind_val, num_stars, 
-                    real_ra, real_dec, result_ra, result_dec, solve_t
+                    real_ra, real_dec, result_ra, result_dec, solve_t,
+                    data_snr, data_rot
                 ]]
                 data_generator = itertools.chain(data_generator, data_line)
 
@@ -261,10 +272,13 @@ def run_sim(
                 result_ra = -999
                 result_dec = -999
                 solve_t = solve_tf
+                data_snr = image.snr
+                data_rot = image.rotation
             
                 data_line = [[
                     trials, solved, alt_err, ind_val, num_stars, 
-                    real_ra, real_dec, result_ra, result_dec, solve_t
+                    real_ra, real_dec, result_ra, result_dec, solve_t,
+                    data_snr, data_rot
                 ]]
                 data_generator = itertools.chain(data_generator, data_line)
 
@@ -293,10 +307,13 @@ def run_sim(
                 result_ra = result.ra.value
                 result_dec = result.dec.value
                 solve_t = solve_tf
+                data_snr = image.snr
+                data_rot = image.rotation
             
                 data_line = [[
                     trials, solved, alt_err, ind_val, num_stars, 
-                    real_ra, real_dec, result_ra, result_dec, solve_t
+                    real_ra, real_dec, result_ra, result_dec, solve_t,
+                    data_snr, data_rot
                 ]]
                 data_generator = itertools.chain(data_generator, data_line)
 
@@ -325,8 +342,7 @@ def run_sim(
             timeout_fail_per_solver = 100 * timeout_fail / (trial_num - star_num_fail)
             timeout_fail_per_total = 100 * timeout_fail / trial_num
             star_num_fail_per_total = 100 * star_num_fail / trial_num
-            snr_str = '# SNR: {0}\n'.format(snr) if snr is not None else ''
-            skip_str = '# skip_header = 24\n' if snr is not None else '# skip_header = 23\n'
+            skip_str = '# skip_header = 23\n'
 
             out.write(
                 '# STEREO Data for run titled "{0}"\n'.format(run_name) + 
@@ -340,7 +356,7 @@ def run_sim(
                 '# Low Star Counts (<{0}): {1}, {2}%\n'.format(
                     star_min, star_num_fail, star_num_fail_per_total) +
                 '# Total Data Collection Time: {0} hrs\n'.format(total_t) + 
-                snr_str + skip_str + 
+                skip_str + 
                 '#\n# Column Notes\n' + 
                 '# num: Data Index\n' + 
                 '# solved: 1 = Success, 0 = Fail, -1 = Undetermined (low star count or timed out)\n' + 
@@ -352,12 +368,14 @@ def run_sim(
                 '# ra: Result RA of the center of the field in degrees\n' + 
                 '# dec: Result DEC of the center of the field in degrees\n' +
                 '# solve_time: Total time taken to solve (or fail) in seconds\n' +
-                '#\n# num     solved     alt_error     A4_index     star_ct     real_ra     real_dec     ra     dec     solve_time\n'
+                '# snr: mean(signal) / sqrt(mean(background))\n' +
+                '# rotation: payload/camera rotation in arcsec/s\n' +
+                '#\n# num     solved     alt_error     A4_index     star_ct     real_ra     real_dec     ra     dec     solve_time     snr     rotation\n'
             )
 
             for data in data_generator:
                 out.write(
-                    '{0}     {1}     {2}     {3}     {4}     {5}     {6}     {7}     {8}     {9}\n'.format(*data)
+                    '{0}     {1}     {2}     {3}     {4}     {5}     {6}     {7}     {8}     {9}     {10}     {11}\n'.format(*data)
                 )
 
             out.close()
@@ -387,8 +405,7 @@ def run_sim(
             timeout_fail_per_solver = 100 * timeout_fail / (trial_num - star_num_fail)
             timeout_fail_per_total = 100 * timeout_fail / trial_num
             star_num_fail_per_total = 100 * star_num_fail / trial_num
-            snr_str = '# SNR: {0}\n'.format(snr) if snr is not None else ''
-            skip_str = '# skip_header = 24\n' if snr is not None else '# skip_header = 23\n'
+            skip_str = '# skip_header = 23\n'
 
             out.write(
                 '# STEREO Data for run titled "{0}"\n'.format(run_name) + 
@@ -402,7 +419,7 @@ def run_sim(
                 '# Low Star Counts (<{0}): {1}, {2}%\n'.format(
                     star_min, star_num_fail, star_num_fail_per_total) +
                 '# Total Data Collection Time: {0} hrs\n'.format(total_t) + 
-                snr_str + skip_str + 
+                skip_str + 
                 '#\n# Column Notes\n' + 
                 '# num: Data Index\n' + 
                 '# solved: 1 = Success, 0 = Fail, -1 = Undetermined (low star count or timed out)\n' + 
@@ -414,12 +431,14 @@ def run_sim(
                 '# ra: Result RA of the center of the field in degrees\n' + 
                 '# dec: Result DEC of the center of the field in degrees\n' +
                 '# solve_time: Total time taken to solve (or fail) in seconds\n' +
-                '#\n# num     solved     alt_error     A4_index     star_ct     real_ra     real_dec     ra     dec     solve_time\n'
+                '# snr: mean(signal) / sqrt(mean(background))\n' +
+                '# rotation: payload/camera rotation in arcsec/s\n' +
+                '#\n# num     solved     alt_error     A4_index     star_ct     real_ra     real_dec     ra     dec     solve_time     snr     rotation\n'
             )
-            
+
             for data in data_generator:
                 out.write(
-                    '{0}     {1}     {2}     {3}     {4}     {5}     {6}     {7}     {8}     {9}\n'.format(*data)
+                    '{0}     {1}     {2}     {3}     {4}     {5}     {6}     {7}     {8}     {9}     {10}     {11}\n'.format(*data)
                 )
 
             out.close()
@@ -438,6 +457,8 @@ parser.add_argument('-t', '--TOTAL_SOLVE_TRIALS', type=float, default=100,
                     help='int; number of solved trials to accomplish; default=100')
 parser.add_argument('--SNR', type=float, default=None,
                     help='float; the desired signal-to-noise ratio; default=None')
+parser.add_argument('--ROTATION', type=float, default=None,
+                    help='float; the desired rotation of the payload')
 parser.add_argument('-v', '--VERBOSE_FACTOR', type=int, default=100,
                     help='int; print progress per this factor; default=100')
 parser.add_argument('-s', '--SINGLE_RUN', action='store_true',
@@ -452,6 +473,7 @@ args = parser.parse_args()
 TST = args.TOTAL_SOLVE_TRIALS
 RN = args.RUN_NAME
 SNR = args.SNR
+ROT = args.ROTATION
 VF = args.VERBOSE_FACTOR
 SR = args.SINGLE_RUN
 SI = args.SAVE_IMAGE
@@ -463,6 +485,7 @@ run_sim(
     RN,
     star_min=4,
     snr=SNR,
+    rotation=ROT,
     verbose_factor=VF,
     single_run=SR,
     save_image=SI,

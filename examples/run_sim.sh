@@ -36,6 +36,9 @@ display_help() {
     echo
     echo "   $(arg_sty --snr snr)       Force the images to have this signal-to-noise ratio."
     echo
+    echo "   $(arg_sty --rot rot)       Rotation speed in arcsec/sec. If not set, rotation is selected"
+    echo "                   randomly from a Gaussian range in ANITA flightpath data."
+    echo
     echo "   $(arg_sty --jobs jobs)"
     echo "   $(arg_sty -j jobs)         How many jobs to split the sim into. Default=10."
     echo
@@ -56,7 +59,7 @@ fi
 
 # define CL args
 OPTIONS=ht:j:
-LONGOPTS=help,test_args,total:,snr:,j:
+LONGOPTS=help,test_args,total:,snr:,rot:,j:
 
 # -regarding ! and PIPESTATUS see above
 # -temporarily store output to be able to check for errors
@@ -72,7 +75,7 @@ fi
 eval set -- "$PARSED"
 
 # set defaults
-TOTAL=10000 SNR=-999 JOBS=10 TEST_ARGS=false
+TOTAL=10000 SNR=-999 ROT=-999 JOBS=10 TEST_ARGS=false
 # now enjoy the options in order and nicely split until we see --
 while true; do
     case "$1" in
@@ -90,6 +93,10 @@ while true; do
 	    ;;
 	--snr)
 	    SNR=$2
+	    shift 2
+	    ;;
+	--rot)
+	    ROT=$2
 	    shift 2
 	    ;;
 	-j|--jobs)
@@ -128,8 +135,18 @@ else
     SNR_STR_TEST=" snr: $SNR,"
 fi
 
+# Rotation stuff
+if (( $(echo "$ROT == -999" |bc -l) )); then
+    ROT_STR=""
+    ROT_STR_TEST=""
+else
+    ROT_STR="--ROTATION $ROT"
+    ROT_STR_TEST=" rotation: $ROT,"
+fi
+
+# return arguments if testing
 if [ "$TEST_ARGS" = true ]; then
-    echo "name: $RUN_NAME, total: $TOTAL,$SNR_STR_TEST jobs: $JOBS"
+    echo "name: $RUN_NAME, total: $TOTAL,$SNR_STR_TEST$ROT_STR_TEST jobs: $JOBS"
     exit 0
 fi
 
@@ -174,7 +191,7 @@ trap finish SIGINT
 
 # run the sim using all cores
 RUN_SIM="${PROGRAM_DIR}/run_sim.py"
-parallel --termseq INT,5000 -u -j 100% python3 $RUN_SIM -t $TRIALS -v $VERBOSE_FACTOR $(echo $SNR_STR) ::: $FILENAMES
+parallel --termseq INT,5000 -u -j 100% python3 $RUN_SIM -t $TRIALS -v $VERBOSE_FACTOR $(echo $SNR_STR) $(echo $ROT_STR) ::: $FILENAMES
 
 finish
 

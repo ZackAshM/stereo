@@ -2,7 +2,7 @@
 This module provides the Image class.
 """
 
-from typing import Dict, Tuple, Any
+from typing import Any, Dict, Tuple
 
 import attr
 import numpy as np
@@ -43,7 +43,7 @@ class Image(object):
     psf_sigma : float
         The standard deviation of the Gaussian PSF in pixels. Default = 3.
     snr : float
-        If specified, forces the image to have this signal-to-noise ratio 
+        If specified, forces the image to have this signal-to-noise ratio
         defined by mean(star count) / sqrt(mean(noise count)).
     rotation : float
         The camera rotation in arcsec/sec.
@@ -116,14 +116,16 @@ class Image(object):
     def trail_length(self) -> int:
         """Returns the trail length of stars in the image in pixels."""
         try:
-            return self._trail_length # type: ignore
+            return self._trail_length  # type: ignore
         except AttributeError:
             if self.cam is None:
                 raise ValueError("Camera object required to determine trail length")
-            trail_length = int(self.rotation * self.cam.exp_time / self.cam.pixscale)
+            trail_length = abs(
+                int(self.rotation * self.cam.exp_time / self.cam.pixscale)
+            )
             trail_length += 1
             self._trail_length = trail_length
-            return trail_length            
+            return trail_length
 
     @property
     def altaz_stars(self) -> Table:
@@ -318,12 +320,14 @@ class Image(object):
                 dark_current_level * self.cam.exp_time, size=self.size
             )
             background = read_noise + dark_current
-            
+
             # force signal-to-noise ratio if desired
+            signal = np.mean(image_data[image_data > 0])
+            noise = np.mean(background[background > 0]) ** 0.5
             if self.snr is not None:
-                signal = np.mean(image_data[image_data > 0])
-                noise = np.mean(background[background > 0])**0.5
                 image_data *= self.snr / (signal / noise)
+            else:
+                self.snr = signal / noise
 
             # add background
             image_data += background
@@ -448,7 +452,7 @@ class Image(object):
         Parameters
         ----------
         vmin, vmax : float
-            The min and max passed into the pyplot LogNorm scale. 
+            The min and max passed into the pyplot LogNorm scale.
             Default = image min/max.
         centroids : ndarray
             The centroids of the image. If not None, returns the image with position
@@ -462,18 +466,32 @@ class Image(object):
             Keyword arguments passed to plt.subplots
         """
 
-        if 'figsize' not in subplots_kws:
-            subplots_kws['figsize'] = [20,10]
+        if "figsize" not in subplots_kws:
+            subplots_kws["figsize"] = [20, 10]
         fig, ax = plt.subplots(**subplots_kws)
         plt.gray()
 
         if self.snr:
-            title = r'ra{0:.2f}$\degree$dec{1:.2f}$\degree$, FoV: {2:.1f}$\degree$, SNR: {3:.1f}, $\omega$: {4:0}"/s'.format(
-                self.center.ra.value, self.center.dec.value, self.cam.fov[2], self.snr, self.rotation
+            title = (
+                r"ra{0:.2f}$\degree$dec{1:.2f}$\degree$, "
+                + r"FoV: {2:.1f}$\degree$, SNR: {3:.1f}, $\omega$: "
+                + r'{4:0}"/s'
+            ).format(
+                self.center.ra.value,
+                self.center.dec.value,
+                self.cam.fov[2],
+                self.snr,
+                self.rotation,
             )
         else:
-            title = r'ra{0:.2f}$\degree$dec{1:.2f}$\degree$, FoV: {2:.1f}$\degree$, $\omega$: {3:0}"/s'.format(
-                self.center.ra.value, self.center.dec.value, self.cam.fov[2], self.rotation
+            title = (
+                r"ra{0:.2f}$\degree$dec{1:.2f}$\degree$, "
+                + r'FoV: {2:.1f}$\degree$, $\omega$: {3:0}"/s'
+            ).format(
+                self.center.ra.value,
+                self.center.dec.value,
+                self.cam.fov[2],
+                self.rotation,
             )
         plt.title(title)
         vmin = np.min(self.image) if vmin is None else vmin
@@ -491,6 +509,6 @@ class Image(object):
 
         # save if desired
         if filename:
-            plt.savefig(filename + ".png", bbox_inches='tight', pad_inches=0)
+            plt.savefig(filename + ".png", bbox_inches="tight", pad_inches=0)
 
         plt.show()
