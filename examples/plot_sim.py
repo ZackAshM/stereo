@@ -440,11 +440,10 @@ if args.param == 'none':
 else:
 
     filenames = glob.glob("{0}/{1}".format(data_dir, args.DATA_NAME))
-    print(filenames)
     SAVE = "{0}/{1}.txt".format(data_dir, args.SAVE_NAME)
 
-    # p_alt_err = False if (args.error or args.perf) and not args.error else True
-    # p_perf = False if (args.error or args.perf) and not args.perf else True
-    # p_time = args.time
+    p_alt_err = False if (args.error or args.perf) and not args.error else True
+    p_perf = False if (args.error or args.perf) and not args.perf else True
+    p_time = args.time
     
-    # analyze_param(args.param, filenames, SAVE, p_alt_err=p_alt_err, p_perf=p_perf, p_time=p_time)
+    analyze_param(args.param, filenames, SAVE, p_alt_err=p_alt_err, p_perf=p_perf, p_time=p_time)
