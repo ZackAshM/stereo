@@ -38,6 +38,10 @@ setup(
         "astropy",
         "matplotlib",
         "uproot",
+        "scipy",
+        "attrs",
+        "timeout_decorator",
+        "tqdm",
         "tetra3 @ git+https://github.com/esa/tetra3",
     ],
     extras_require={
