@@ -310,8 +310,15 @@ class Image(object):
             for i in zip(yind, xind, ct):
                 for shift in range(self.trail_length):
                     try:
+                        # Coords generated at the end of trail
                         yshift = int(i[0] + shift * np.sin(self.roll))
                         xshift = int(i[1] + shift * np.cos(self.roll))
+                        # Use below to have coords generated at center of trail
+                        # yshift = int(i[0] + (shift - 0.5 * self.trail_length) *
+                        #              np.sin(self.roll))
+                        # xshift = int(i[1] + (shift - 0.5 * self.trail_length) *
+                        #              np.cos(self.roll))
+
                         image_data[yshift, xshift] = i[2] / self.trail_length
                     except IndexError:
                         continue

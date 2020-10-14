@@ -7,11 +7,11 @@ import os.path as op
 from pathlib import Path
 from typing import Any, Dict, Union
 
+import tetra3
 import timeout_decorator
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 
-import tetra3
 from stereo.sim import Image
 
 

@@ -206,6 +206,7 @@ def run_sim(
             # make the image
             image.rotation = rotation if rotation is not None else np.random.normal(loc=152.504, scale=949.721)
             image.snr = snr
+            # image.roll = np.deg2rad()
             make_image = image.image
 
             # plot image
@@ -214,7 +215,7 @@ def run_sim(
                 
             # run star tracker algorithm
             try:
-                t3result = run_tetra3(image, database=db, t3=t3, return_result=True,
+                t3result = run_tetra3(image, database=db, t3=t3, return_result=True, timeout=5,
                                       **solve_dict, **centroid_dict)
                 solve_tf = t3result['T_solve']
                 if t3result["RA"] is None or t3result["Dec"] is None:

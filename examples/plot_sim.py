@@ -440,7 +440,7 @@ if args.param == 'none':
 else:
 
     filenames = glob.glob("{0}/{1}".format(data_dir, args.DATA_NAME))
-    SAVE = "{0}/{1}.txt".format(data_dir, args.SAVE_NAME)
+    SAVE = "{0}/{1}".format(data_dir, args.SAVE_NAME)
 
     p_alt_err = False if (args.error or args.perf) and not args.error else True
     p_perf = False if (args.error or args.perf) and not args.perf else True
